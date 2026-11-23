@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>local-db-chat</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar" aria-label="Database tables">
+      <div class="side-head">
+        <h2>Tables</h2>
+        <button id="refresh" class="ghost" type="button" title="Re-read the database schema">Refresh</button>
+      </div>
+      <input id="filter" class="filter" type="search" placeholder="Filter tables" aria-label="Filter tables">
+      <ul id="tables" class="tables"></ul>
+      <p id="side-note" class="muted small"></p>
+    </aside>
+
+    <main class="main">
+      <header class="top">
+        <button id="toggle-side" class="ghost only-mobile" type="button" aria-controls="sidebar">Tables</button>
+        <div>
+          <h1>local-db-chat</h1>
+          <p class="muted small">Runs on this computer only. Read-only access.</p>
+        </div>
+        <button id="clear" class="ghost" type="button" title="Start a new conversation">New chat</button>
+      </header>
+
+      <section id="log" class="log" aria-live="polite">
+        <div class="empty" id="empty">
+          <p>Ask a question about your data in plain English.</p>
+          <div class="suggestions" id="suggestions"></div>
+        </div>
+      </section>
+
+      <form id="form" class="composer">
+        <textarea id="q" rows="1" maxlength="2000" placeholder="e.g. How many open tickets does Acme have?"
+                  aria-label="Your question" required></textarea>
+        <button id="send" type="submit">Ask</button>
+      </form>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

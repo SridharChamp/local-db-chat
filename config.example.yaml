@@ -1,0 +1,57 @@
+# Copy this file to config.yaml and edit it. config.yaml is git-ignored.
+
+# --- Database -------------------------------------------------------------
+# Use a READ-ONLY database user (see README). The password can come from the
+# LDBC_DATABASE_URL environment variable instead of this file.
+database_url: postgresql+psycopg://support_ro:CHANGE_ME@localhost:5432/app
+
+# Only look at these schemas (empty = the default schema).
+schemas: []
+# Glob patterns. Empty include list = all tables.
+include_tables: []
+exclude_tables: ["*_audit", "django_*", "flyway_*", "schema_migrations"]
+
+# Columns hidden from the model and refused in queries. Substrings match any
+# column name; use "table.column" (globs allowed) for exact ones.
+sensitive_columns:
+  - password
+  - passwd
+  - secret
+  - token
+  - api_key
+  - card_number
+  - cvv
+  - ssn
+  - otp
+  - salt
+  - hash
+  # - customers.phone
+  # - "*.date_of_birth"
+
+# --- Limits ---------------------------------------------------------------
+max_rows: 200          # rows returned per answer
+timeout_seconds: 15    # per query
+max_retries: 2         # times the model may fix its own SQL
+sample_rows: 3         # example rows per table shown to the model (0 = none)
+max_tables_in_prompt: 8
+
+# --- Local model (Ollama) -------------------------------------------------
+ollama_url: http://127.0.0.1:11434
+model: qwen2.5-coder:7b
+embed_model: ""        # e.g. nomic-embed-text, helps with very large schemas
+num_ctx: 8192
+keep_alive: 30m
+explain_answers: false # extra sentence from the model; numbers are checked against the data
+
+# --- Business vocabulary ----------------------------------------------------
+glossary:
+  active customer: customers.status = 'A'
+  open ticket: support_tickets.status in ('open', 'in_progress')
+
+examples:
+  - question: How many active customers do we have?
+    sql: SELECT COUNT(*) AS active_customers FROM customers WHERE status = 'A'
+
+# --- Web UI ---------------------------------------------------------------
+web_host: 127.0.0.1    # keep this unless you need to share it on your network
+web_port: 8765

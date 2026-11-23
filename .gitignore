@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+
+# Local config holds your connection string; never commit it.
+config.yaml
+*.db
+*.sqlite
+
+# Verified examples are yours to commit or not; default keep them local.
+.ldbc/
