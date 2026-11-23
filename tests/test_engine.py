@@ -18,7 +18,8 @@ def test_happy_path(make_assistant):
     assert ans.tables == ["customers"]
     system, question = llm.calls[0][0]["content"], llm.calls[0][-1]["content"]
     assert "password_hash" not in system            # protected column never shown to the model
-    assert dt.date.today().isoformat() in question  # relative dates can be resolved
+    assert system.endswith(f"Today's date is {dt.date.today().isoformat()}.")  # relative dates resolve
+    assert question == "How many active customers?"  # the question itself stays clean
     assert ans.schema_in_prompt == "full"
 
 
@@ -32,7 +33,8 @@ def test_every_question_starts_with_the_same_schema_block(make_assistant):
     assert first == second                           # identical prefix -> Ollama reuses it
     for table in ("agents", "customers", "order_items", "orders", "products", "support_tickets"):
         assert f"TABLE {table} (" in first           # the whole schema, not a per-question pick
-    assert dt.date.today().isoformat() not in first  # nothing that changes lives in the prefix
+    assert first.startswith(a._prefix)               # date goes after the reusable schema block
+    assert dt.date.today().isoformat() not in a._prefix
 
 
 def test_schema_block_does_not_change_across_days(make_assistant):
@@ -41,14 +43,16 @@ def test_schema_block_does_not_change_across_days(make_assistant):
     _ = a.schema
     day1 = build_messages(a._prefix, "q", examples=[], history=[], today=dt.date(2026, 1, 1))
     day2 = build_messages(a._prefix, "q", examples=[], history=[], today=dt.date(2026, 1, 2))
-    assert day1[0] == day2[0] and day1[-1] != day2[-1]
+    assert day1[0] != day2[0]                        # the date line changes...
+    assert day1[0]["content"].startswith(a._prefix) and day2[0]["content"].startswith(a._prefix)  # ...after the schema
+    assert day1[-1] == day2[-1]
 
 
 def test_preload_reads_schema_once_up_front(make_assistant):
     a, llm = make_assistant([""])
     stats = a.preload()
     assert a.preloaded and stats == {}
-    assert len(llm.calls) == 1 and llm.calls[0][0]["content"] == a._prefix
+    assert len(llm.calls) == 1 and llm.calls[0][0]["content"].startswith(a._prefix)
     assert llm.kwargs[0]["max_tokens"] == 1          # read only; don't generate
 
 

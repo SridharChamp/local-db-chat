@@ -221,15 +221,18 @@ class Assistant:
                 ans.model[key] = ans.model.get(key, 0) + value
             messages.append({"role": "assistant", "content": reply})
 
-            if reply.strip().upper().startswith(CANNOT_ANSWER):
+            raw_sql = extract_sql(reply)
+            refusal = next((t for t in (reply.strip(), raw_sql) if t.upper().startswith(CANNOT_ANSWER)), None)
+            if refusal is not None:
                 ans.cannot_answer = True
-                reason = (reply.split(":", 1)[1].strip() if ":" in reply else "").rstrip(".!")
+                reason = refusal[len(CANNOT_ANSWER):].lstrip(" :").strip().rstrip(".!")
+                if reason.startswith("<") and reason.endswith(">"):
+                    reason = ""  # the model copied a placeholder; no real reason given
                 ans.answer = ("I can't answer that from this database"
                               + (f": {reason}." if reason else ".")
                               + " Try rephrasing, or add the term to the glossary.")
                 break
 
-            raw_sql = extract_sql(reply)
             try:
                 sql, used = check_sql(raw_sql, schema, max_rows=self.cfg.max_rows)
             except UnsafeQueryError as exc:

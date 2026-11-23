@@ -6,6 +6,9 @@
   refresh). Every question reuses that work, so each one only pays for itself.
 - The model stops right after the SQL, with a capped reply length.
 - Each answer reports the model's read and write time and token counts.
+- More precise answers: short text columns list their real values (e.g. priority: low, medium, high,
+  urgent), the model only adds date filters when the question names a time period, and glossary terms
+  are applied as exact conditions.
 
 - First-run setup screen in the browser: enter database details, test, save. No config file editing.
 - The model downloads through the local Ollama with a progress bar.

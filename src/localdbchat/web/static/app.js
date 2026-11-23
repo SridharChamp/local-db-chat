@@ -113,9 +113,9 @@
     if (a.model && a.model.prompt_tokens !== undefined) {
       const m = a.model;
       const c = chip(`model ${((m.read_ms + m.write_ms) / 1000).toFixed(1)}s`);
-      c.title = `Read ${m.prompt_tokens} new tokens in ${(m.read_ms / 1000).toFixed(1)}s` +
-        (a.schema_in_prompt === "full" ? " (the schema itself was reused from memory)" : "") +
-        `, wrote ${m.output_tokens} tokens in ${(m.write_ms / 1000).toFixed(1)}s`;
+      c.title = `Prompt of ${m.prompt_tokens} tokens read in ${(m.read_ms / 1000).toFixed(1)}s` +
+        (a.schema_in_prompt === "full" ? " (the schema part is reused from memory, so this stays short)" : "") +
+        `; ${m.output_tokens} tokens written in ${(m.write_ms / 1000).toFixed(1)}s`;
       meta.appendChild(c);
     }
     if (a.timings_ms && a.timings_ms.total !== undefined) meta.appendChild(chip(`${(a.timings_ms.total / 1000).toFixed(1)}s`));

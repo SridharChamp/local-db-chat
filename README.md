@@ -134,10 +134,19 @@ your VPN or reverse proxy, and never expose it to the internet.
 
 **Hardware**
 
-| Setup | Speed per question |
+Measured on a 6-core AMD Ryzen 5 7600, **CPU only**, `qwen2.5-coder:3b`, with the demo database:
+
+| | Time |
 |---|---|
-| NVIDIA GPU (8 GB+) or Apple Silicon | 1–3 seconds |
-| Modern CPU only, 16 GB RAM | 10–40 seconds with a 7B model; use a 3B model for faster replies |
+| Loading the schema into the model (once, in the background, when you connect) | 7–14 s |
+| First question *without* preloading (the model reads the whole schema) | ~14 s |
+| Each question after preloading | **1.5–4 s** (reading ~0.2 s; the rest is writing the SQL) |
+| Repeated or verified question | milliseconds (the model is skipped) |
+
+5 of 6 benchmark questions were answered exactly on the first try. The miss read "still open" as only
+`status = 'open'` instead of the glossary's "open ticket". Marking the answer **Wrong** and saving the right
+SQL, or adding the term to the glossary, fixes that kind of miss for good. A 7B model makes fewer of them.
+A GPU or Apple Silicon makes everything several times faster.
 
 **Ollama's own online features.** local-db-chat never sends your data anywhere. Ollama itself can
 check for updates and offers optional cloud models. To keep it fully offline, set the environment

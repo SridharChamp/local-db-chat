@@ -20,6 +20,9 @@ from sqlglot import exp
 from .db import Database, DatabaseError
 
 SAMPLE_CACHE_SIZE = 256
+MAX_HINT_VALUES = 12
+MAX_HINT_VALUE_CHARS = 40
+HINT_SCAN_ROWS = 5000
 MAX_SAMPLE_COLUMNS = 12
 MAX_PROMPT_VALUE_CHARS = 60
 
@@ -43,6 +46,12 @@ class Column:
     primary_key: bool = False
     comment: str = ""
     sensitive: bool = False
+    values: list[str] | None = None  # the few distinct values of a short text column, if it has few
+
+    @property
+    def is_text(self) -> bool:
+        t = self.type.upper()
+        return any(k in t for k in ("CHAR", "TEXT", "STRING", "ENUM", "CITEXT")) and "[]" not in t
 
 
 @dataclass
@@ -276,6 +285,7 @@ class SampleCache:
         self.rows_per_table = rows_per_table
         self.max_tables = max_tables
         self._data: OrderedDict[str, list[list]] = OrderedDict()
+        self._hinted: set[str] = set()
         self._lock = threading.Lock()
 
     def get(self, table: Table) -> tuple[list[str], list[list]]:
@@ -301,6 +311,37 @@ class SampleCache:
     def clear(self) -> None:
         with self._lock:
             self._data.clear()
+            self._hinted.clear()
+
+    def hints(self, table: Table) -> None:
+        """Record the possible values of short text columns (status, priority, type...).
+
+        Small models guess 'high' for "urgent" unless they see the real values. Looks
+        at a bounded sample of rows so it stays fast on large tables, and keeps a
+        column only if it has at most MAX_HINT_VALUES short values.
+        """
+        with self._lock:
+            if table.key in self._hinted:
+                return
+            self._hinted.add(table.key)
+        for col in table.visible_columns:
+            if not col.is_text or col.primary_key or col.values is not None:
+                continue
+            inner = sa.select(sa.column(col.name)) \
+                .select_from(sa.table(table.name, schema=table.schema)).limit(HINT_SCAN_ROWS).subquery()
+            stmt = sa.select(inner.c[col.name]).distinct().limit(MAX_HINT_VALUES + 1)
+            try:
+                sql = str(stmt.compile(self.db.engine, compile_kwargs={"literal_binds": True}))
+                rows = self.db.run(sql, max_rows=MAX_HINT_VALUES + 1).rows
+            except (DatabaseError, sa.exc.SQLAlchemyError):
+                col.values = []
+                continue
+            vals = [r[0] for r in rows if isinstance(r[0], str)]
+            if 0 < len(rows) <= MAX_HINT_VALUES and len(vals) == len(rows) \
+                    and all(0 < len(v) <= MAX_HINT_VALUE_CHARS for v in vals):
+                col.values = sorted(vals, key=str.lower)
+            else:
+                col.values = []
 
 
 def _short(value):
@@ -322,7 +363,11 @@ def render_table(table: Table, dialect: str, samples: tuple[list[str], list[list
             bits.append("PRIMARY KEY")
         if not col.nullable and not col.primary_key:
             bits.append("NOT NULL")
-        body.append((" ".join(bits), col.comment))
+        note = col.comment
+        if col.values:
+            listed = "values: " + ", ".join("'" + v.replace("'", "''") + "'" for v in col.values)
+            note = f"{note}; {listed}" if note else listed
+        body.append((" ".join(bits), note))
     for fk in table.foreign_keys:
         ref = f"{fk.ref_schema}.{fk.ref_table}" if fk.ref_schema else fk.ref_table
         body.append((f"  FOREIGN KEY ({', '.join(fk.columns)}) REFERENCES {ref}({', '.join(fk.ref_columns)})", ""))

@@ -55,8 +55,8 @@ def _print_answer(ans, show_sql: bool) -> None:
     tags = [t for t, on in (("verified", ans.verified), ("cached", ans.cached)) if on]
     m = ans.model
     if m:
-        tags.append(f"model read {m.get('prompt_tokens', 0)} new tokens in {m.get('read_ms', 0) / 1000:.1f}s, "
-                    f"wrote {m.get('output_tokens', 0)} in {m.get('write_ms', 0) / 1000:.1f}s")
+        tags.append(f"model: prompt read in {m.get('read_ms', 0) / 1000:.1f}s, "
+                    f"{m.get('output_tokens', 0)} tokens written in {m.get('write_ms', 0) / 1000:.1f}s")
     print(f"\n[{ans.timings_ms.get('total', 0) / 1000:.1f}s"
           + (f", {', '.join(tags)}" if tags else "")
           + (f", tables: {', '.join(ans.tables)}" if ans.tables else "") + "]")

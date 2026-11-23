@@ -121,3 +121,16 @@ def test_sample_cache_is_bounded(db, schema):
     for t in schema.tables.values():
         cache.get(t)
     assert len(cache._data) == 2
+
+
+def test_value_hints_for_short_text_columns(db, schema):
+    cache = SampleCache(db, 0)
+    tickets = schema.find("support_tickets")
+    cache.hints(tickets)
+    assert tickets.column("priority").values == ["high", "low", "medium", "urgent"]
+    assert tickets.column("opened_at").values == []          # many distinct values: no list
+    customers = schema.find("customers")
+    cache.hints(customers)
+    assert customers.column("full_name").values == []         # names are not a category
+    assert customers.column("password_hash").values is None   # protected: never looked at
+    assert "values: 'high', 'low', 'medium', 'urgent'" in render_table(tickets, "sqlite")
