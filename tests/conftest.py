@@ -17,9 +17,11 @@ class FakeLLM:
     def __init__(self, replies=None):
         self.replies = list(replies or [])
         self.calls = []
+        self.kwargs = []
 
-    def chat(self, messages, **_):
+    def chat(self, messages, **kwargs):
         self.calls.append([dict(m) for m in messages])  # snapshot: the engine keeps appending
+        self.kwargs.append(kwargs)
         if not self.replies:
             raise AssertionError("FakeLLM ran out of replies")
         reply = self.replies.pop(0)

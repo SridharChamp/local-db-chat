@@ -16,10 +16,76 @@ def test_happy_path(make_assistant):
     assert ans.columns == ["active_customers"] and isinstance(ans.rows[0][0], int)
     assert ans.answer.startswith("Active customers: ")
     assert ans.tables == ["customers"]
-    prompt = llm.calls[0][0]["content"]
-    assert "password_hash" not in prompt          # protected column never shown to the model
-    assert dt.date.today().isoformat() in prompt  # relative dates can be resolved
+    system, question = llm.calls[0][0]["content"], llm.calls[0][-1]["content"]
+    assert "password_hash" not in system            # protected column never shown to the model
+    assert dt.date.today().isoformat() in question  # relative dates can be resolved
+    assert ans.schema_in_prompt == "full"
 
+
+# ------------------------------------------------------------ speed: preloaded schema
+def test_every_question_starts_with_the_same_schema_block(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM orders"),
+                             fenced("SELECT COUNT(*) AS n FROM agents")])
+    a.ask("How many orders?")
+    a.ask("How many agents are there?")
+    first, second = llm.calls[0][0]["content"], llm.calls[1][0]["content"]
+    assert first == second                           # identical prefix -> Ollama reuses it
+    for table in ("agents", "customers", "order_items", "orders", "products", "support_tickets"):
+        assert f"TABLE {table} (" in first           # the whole schema, not a per-question pick
+    assert dt.date.today().isoformat() not in first  # nothing that changes lives in the prefix
+
+
+def test_schema_block_does_not_change_across_days(make_assistant):
+    from localdbchat.prompts import build_messages
+    a, _ = make_assistant([])
+    _ = a.schema
+    day1 = build_messages(a._prefix, "q", examples=[], history=[], today=dt.date(2026, 1, 1))
+    day2 = build_messages(a._prefix, "q", examples=[], history=[], today=dt.date(2026, 1, 2))
+    assert day1[0] == day2[0] and day1[-1] != day2[-1]
+
+
+def test_preload_reads_schema_once_up_front(make_assistant):
+    a, llm = make_assistant([""])
+    stats = a.preload()
+    assert a.preloaded and stats == {}
+    assert len(llm.calls) == 1 and llm.calls[0][0]["content"] == a._prefix
+    assert llm.kwargs[0]["max_tokens"] == 1          # read only; don't generate
+
+
+def test_refresh_rebuilds_the_block_and_needs_new_preload(make_assistant, demo_db):
+    import sqlite3
+    a, _ = make_assistant([""])
+    a.preload()
+    con = sqlite3.connect(demo_db)
+    con.execute("CREATE TABLE refunds (refund_id INTEGER PRIMARY KEY, amount NUMERIC)")
+    con.commit()
+    con.close()
+    a.refresh_schema()
+    assert not a.preloaded and "TABLE refunds (" in a._prefix
+
+
+def test_huge_schema_falls_back_to_per_question_tables(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents")], num_ctx=1700)
+    assert not a.schema_preloadable
+    assert a.preload() == {} and llm.calls == []
+    ans = a.ask("How many agents?")
+    assert ans.ok and ans.schema_in_prompt == "selected"
+    assert "TABLE agents (" in llm.calls[0][0]["content"]
+
+
+def test_reply_is_capped_and_stops_after_the_sql(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents")])
+    a.ask("How many agents?")
+    assert llm.kwargs[0]["max_tokens"] == 512 and llm.kwargs[0]["stop"] == ["\n```\n"]
+
+
+def test_model_timings_are_reported(make_assistant):
+    from localdbchat.llm import Reply
+    reply = Reply(fenced("SELECT COUNT(*) AS n FROM agents"),
+                  {"prompt_tokens": 18, "read_ms": 90, "output_tokens": 14, "write_ms": 700, "load_ms": 0})
+    a, _ = make_assistant([reply])
+    ans = a.ask("How many agents?")
+    assert ans.model == {"prompt_tokens": 18, "read_ms": 90, "output_tokens": 14, "write_ms": 700, "load_ms": 0}
 
 
 def test_glossary_reaches_the_prompt(make_assistant):

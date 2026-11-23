@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Faster answers: the full schema is loaded into the model once when you connect (and on start or
+  refresh). Every question reuses that work, so each one only pays for itself.
+- The model stops right after the SQL, with a capped reply length.
+- Each answer reports the model's read and write time and token counts.
+
 - First-run setup screen in the browser: enter database details, test, save. No config file editing.
 - The model downloads through the local Ollama with a progress bar.
 - `ldbc setup`: the same steps in the terminal.

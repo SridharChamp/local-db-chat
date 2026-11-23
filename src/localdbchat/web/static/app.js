@@ -110,6 +110,14 @@
     if (a.verified) meta.appendChild(chip("verified answer", "good"));
     else if (a.cached) meta.appendChild(chip("cached"));
     if (a.attempts > 1) meta.appendChild(chip(`${a.attempts} tries`));
+    if (a.model && a.model.prompt_tokens !== undefined) {
+      const m = a.model;
+      const c = chip(`model ${((m.read_ms + m.write_ms) / 1000).toFixed(1)}s`);
+      c.title = `Read ${m.prompt_tokens} new tokens in ${(m.read_ms / 1000).toFixed(1)}s` +
+        (a.schema_in_prompt === "full" ? " (the schema itself was reused from memory)" : "") +
+        `, wrote ${m.output_tokens} tokens in ${(m.write_ms / 1000).toFixed(1)}s`;
+      meta.appendChild(c);
+    }
     if (a.timings_ms && a.timings_ms.total !== undefined) meta.appendChild(chip(`${(a.timings_ms.total / 1000).toFixed(1)}s`));
     bubble.appendChild(meta);
 
@@ -324,10 +332,20 @@
     catch (e) { $("model-text").textContent = e.message; return null; }
     fillKinds(status.kinds);
     drawModel(status);
+    const pre = status.preload || {};
+    const preText = {
+      running: " Loading the schema into the model…",
+      done: " Schema loaded into the model.",
+      too_big: " Schema too big to preload; tables are picked per question.",
+      error: " Could not preload the schema: " + (pre.error || ""),
+    }[pre.state] || "";
     $("conn-line").textContent = status.configured
-      ? `Connected to ${status.database}. Read-only. Runs on this computer only.`
+      ? `Connected to ${status.database}. Read-only, on this computer only.${preText}`
       : "Not connected yet. Runs on this computer only.";
-    if (status.pull && status.pull.running) {
+    if (pre.state === "running") {
+      clearTimeout(pullTimer);
+      pullTimer = setTimeout(refreshStatus, 2000);
+    } else if (status.pull && status.pull.running) {
       clearTimeout(pullTimer);
       pullTimer = setTimeout(refreshStatus, 1500);
     }

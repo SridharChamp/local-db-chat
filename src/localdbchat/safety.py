@@ -76,6 +76,10 @@ def extract_sql(text: str) -> str:
         return ""
     match = _FENCE.search(text)
     sql = match.group(1) if match else text
+    if not match and "```" in sql:
+        # Generation stopped at the closing fence, so it is missing: drop the opening one.
+        sql = re.sub(r"^.*?```[a-zA-Z]*[ \t]*\n?", "", sql, count=1, flags=re.DOTALL)
+        sql = sql.replace("```", "")
     sql = sql.strip()
     sql = re.sub(r"^(sql|query)\s*:\s*", "", sql, flags=re.IGNORECASE)
     if not match:

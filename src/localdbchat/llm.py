@@ -11,6 +11,32 @@ class LLMError(Exception):
     """The local model could not answer; the message says how to fix it."""
 
 
+class Reply(str):
+    """The model's text, plus how long it took.
+
+    stats: prompt_tokens (tokens the model had to read this time; small when the
+    schema block was reused from cache), read_ms, output_tokens, write_ms, load_ms.
+    """
+
+    stats: dict
+
+    def __new__(cls, text: str, stats: dict | None = None):
+        obj = super().__new__(cls, text)
+        obj.stats = stats or {}
+        return obj
+
+
+def _stats(data: dict) -> dict:
+    ns = 1_000_000
+    return {
+        "prompt_tokens": int(data.get("prompt_eval_count") or 0),
+        "read_ms": int((data.get("prompt_eval_duration") or 0) / ns),
+        "output_tokens": int(data.get("eval_count") or 0),
+        "write_ms": int((data.get("eval_duration") or 0) / ns),
+        "load_ms": int((data.get("load_duration") or 0) / ns),
+    }
+
+
 class OllamaClient:
     def __init__(self, url: str, model: str, *, embed_model: str = "", timeout: float = 120.0,
                  num_ctx: int = 8192, keep_alive: str = "30m", allow_remote: bool = False):
@@ -33,20 +59,27 @@ class OllamaClient:
                                   trust_env=False)
 
     # ----------------------------------------------------------------- calls
-    def chat(self, messages: list[dict], *, temperature: float = 0.0) -> str:
+    def chat(self, messages: list[dict], *, temperature: float = 0.0, max_tokens: int | None = None,
+             stop: list[str] | None = None, allow_empty: bool = False) -> Reply:
+        # Options must stay identical between calls: a different num_ctx makes Ollama
+        # reload the model and throw away the cached schema block.
+        options = {"temperature": temperature, "top_k": 1, "seed": 7, "num_ctx": self.num_ctx}
+        if max_tokens:
+            options["num_predict"] = max_tokens
+        if stop:
+            options["stop"] = stop
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": False,
             "keep_alive": self.keep_alive,
-            # Deterministic decoding: the same question gives the same SQL.
-            "options": {"temperature": temperature, "top_k": 1, "seed": 7, "num_ctx": self.num_ctx},
+            "options": options,  # temperature 0 + fixed seed: the same question gives the same SQL
         }
         data = self._post("/api/chat", payload, self.model)
         content = ((data.get("message") or {}).get("content") or "").strip()
-        if not content:
+        if not content and not allow_empty:
             raise LLMError("The model returned an empty reply. Try again or use a larger model.")
-        return content
+        return Reply(content, _stats(data))
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not self.embed_model:

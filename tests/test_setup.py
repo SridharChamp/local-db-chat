@@ -97,7 +97,7 @@ class FakeOllama:
 @pytest.fixture()
 def first_run(tmp_path):
     ollama = FakeOllama()
-    replies = FakeLLM(["```sql\nSELECT COUNT(*) AS n FROM agents\n```"])
+    replies = FakeLLM(["", "```sql\nSELECT COUNT(*) AS n FROM agents\n```"])  # preload, then the question
     cfg = Config(learned_examples_file=str(tmp_path / "learned.json"))
     app = create_app(None, cfg=cfg, config_path=str(tmp_path / "config.yaml"),
                      assistant_factory=lambda c: Assistant(c, llm=replies),
@@ -126,10 +126,15 @@ def test_first_run_flow(first_run, demo_db):
     assert saved["ok"] and saved["tables"] == 6
     assert "database_url" in (tmp_path / "config.yaml").read_text(encoding="utf-8")
 
-    status = client.get("/api/status").json()
+    # Saving starts loading the schema into the model in the background
+    for _ in range(100):
+        status = client.get("/api/status").json()
+        if status["preload"]["state"] not in ("idle", "running"):
+            break
     assert status["configured"] and status["dialect"] == "sqlite"
+    assert status["preload"]["state"] == "done"
     answer = client.post("/api/ask", json={"question": "How many agents?"}).json()
-    assert answer["ok"] and answer["rows"] == [[4]]
+    assert answer["ok"] and answer["rows"] == [[4]] and answer["schema_in_prompt"] == "full"
 
 
 def test_bad_connection_is_not_saved(first_run, tmp_path):

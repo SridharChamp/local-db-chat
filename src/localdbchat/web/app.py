@@ -78,6 +78,33 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
     app.state.pull = {"running": False, "status": "", "completed": 0, "total": 0, "error": "", "done": False}
     pull_lock = threading.Lock()
     swap_lock = threading.Lock()
+    app.state.preload = {"state": "idle", "ms": 0, "tokens": 0, "error": ""}
+
+    def start_preload(target: Assistant | None) -> None:
+        """Have the model read the schema in the background, so questions start fast."""
+        if target is None:
+            return
+
+        def run():
+            import time as _time
+            app.state.preload = {"state": "running", "ms": 0, "tokens": 0, "error": ""}
+            t0 = _time.perf_counter()
+            try:
+                if not target.schema_preloadable:
+                    app.state.preload = {"state": "too_big", "ms": 0, "tokens": 0, "error": ""}
+                    return
+                stats = target.preload()
+                if app.state.assistant is target:  # ignore a run overtaken by a newer save
+                    app.state.preload = {"state": "done", "ms": int((_time.perf_counter() - t0) * 1000),
+                                         "tokens": int(stats.get("prompt_tokens", 0)), "error": ""}
+            except (LLMError, DatabaseError) as exc:
+                app.state.preload = {"state": "error", "ms": 0, "tokens": 0, "error": str(exc)}
+
+        threading.Thread(target=run, name="schema-preload", daemon=True).start()
+
+    app.state.start_preload = start_preload
+    if assistant is not None and getattr(assistant, "preloaded", False):
+        app.state.preload = {"state": "done", "ms": 0, "tokens": 0, "error": ""}
     allowed_hosts = {f"localhost:{port}", f"127.0.0.1:{port}", f"[::1]:{port}",
                      "localhost", "127.0.0.1", "[::1]"}
     limiter = asyncio.Semaphore(MAX_CONCURRENT_QUESTIONS)
@@ -167,6 +194,7 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
         if a is not None:
             out["database"] = redact_url(a.db.url)
             out["dialect"] = a.db.backend
+        out["preload"] = dict(app.state.preload)
 
         def check_model():
             llm = make_llm()
@@ -215,6 +243,7 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
                         pass
                 return len(new_assistant.schema)
         tables = await asyncio.to_thread(swap)
+        start_preload(app.state.assistant)
         return {"ok": True, "message": f"Saved. {tables} tables ready.", "tables": tables}
 
     @app.post("/api/model/pull")
@@ -233,6 +262,7 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
                 llm = make_llm()
                 llm.pull(app.state.cfg.model, progress)
                 app.state.pull.update(done=True, status="ready")
+                start_preload(app.state.assistant)  # the model is here now: let it read the schema
             except LLMError as exc:
                 app.state.pull.update(error=str(exc))
             finally:
@@ -283,6 +313,7 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
     async def refresh():
         a = current()
         info = await asyncio.to_thread(a.refresh_schema)
+        start_preload(a)  # the schema block changed: the model has to read the new one
         return {"tables": len(info), "warnings": info.warnings}
 
     @app.get("/api/health")

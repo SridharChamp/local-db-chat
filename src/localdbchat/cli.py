@@ -53,6 +53,10 @@ def _print_answer(ans, show_sql: bool) -> None:
     if show_sql and ans.sql:
         print(f"\nSQL:\n{ans.sql}")
     tags = [t for t, on in (("verified", ans.verified), ("cached", ans.cached)) if on]
+    m = ans.model
+    if m:
+        tags.append(f"model read {m.get('prompt_tokens', 0)} new tokens in {m.get('read_ms', 0) / 1000:.1f}s, "
+                    f"wrote {m.get('output_tokens', 0)} in {m.get('write_ms', 0) / 1000:.1f}s")
     print(f"\n[{ans.timings_ms.get('total', 0) / 1000:.1f}s"
           + (f", {', '.join(tags)}" if tags else "")
           + (f", tables: {', '.join(ans.tables)}" if ans.tables else "") + "]")
@@ -85,6 +89,13 @@ def cmd_chat(args) -> int:
     try:
         schema = assistant.schema
         print(f"Connected: {len(schema)} tables ({schema.dialect}).")
+        if assistant.schema_preloadable:
+            print("Loading the schema into the model…", end="", flush=True)
+            try:
+                stats = assistant.preload()
+                print(f" done ({stats.get('prompt_tokens', 0)} tokens read once, reused for every question).")
+            except LLMError as exc:
+                print(f"\nwarning: {exc}")
         for w in schema.warnings:
             print(f"warning: {w}")
         while True:
@@ -155,11 +166,6 @@ def cmd_serve(args) -> int:
             assistant = Assistant(cfg)
             schema = assistant.schema
             print(f"Database: {assistant.db.display_url} ({len(schema)} tables)")
-            try:
-                assistant.llm.warm_up()
-                print(f"Model ready: {cfg.model}")
-            except LLMError as exc:
-                print(f"warning: {exc}")
         except (DatabaseError, LLMError) as exc:
             print(f"warning: {exc}\nStarting the setup screen so you can fix the connection.")
             if assistant is not None:
@@ -168,6 +174,13 @@ def cmd_serve(args) -> int:
     else:
         print("No database configured yet: the browser will show the setup screen.")
     app = create_app(assistant, cfg=cfg, config_path=config_path, host=host, port=port)
+    if assistant is not None:
+        if assistant.schema_preloadable:
+            print(f"Loading the schema into {cfg.model} in the background, so questions start fast…")
+        else:
+            print(f"The schema is too big to preload into a {cfg.num_ctx}-token context; relevant tables "
+                  "will be picked per question. Raise num_ctx in config.yaml to preload it all.")
+        app.state.start_preload(assistant)
     url = f"http://{'localhost' if is_loopback_host(host) else host}:{port}/"
     if app.state.token:
         print("\nWARNING: listening on a network address. Anyone who can reach it and has the "

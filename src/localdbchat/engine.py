@@ -13,7 +13,16 @@ from .config import Config
 from .db import Database, DatabaseError, QueryResult
 from .llm import LLMError, OllamaClient
 from .memory import ExampleStore, normalise
-from .prompts import CANNOT_ANSWER, EXPLAIN, build_messages, retry_message
+from .prompts import (
+    CANNOT_ANSWER,
+    EXPLAIN,
+    WARM_UP_QUESTION,
+    build_messages,
+    build_system,
+    render_schema,
+    retry_message,
+    schema_char_budget,
+)
 from .retrieval import TableRetriever
 from .safety import UnsafeQueryError, check_sql, extract_sql
 from .schema import SampleCache, SchemaInfo, introspect
@@ -23,7 +32,8 @@ log = logging.getLogger("localdbchat")
 MAX_QUESTION_CHARS = 2000
 MAX_HISTORY_TURNS = 4
 SQL_CACHE_SIZE = 256
-CHARS_PER_TOKEN = 3.5
+MAX_SQL_TOKENS = 512          # a reply longer than this is rambling, not SQL
+SQL_STOP = ["\n```\n"]        # stop right after the closing fence; never pay for explanations
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
 
@@ -44,6 +54,10 @@ class Answer:
     error: str = ""
     problems: list[str] = field(default_factory=list)  # why earlier attempts were refused
     timings_ms: dict[str, int] = field(default_factory=dict)
+    # How the model spent its time: prompt_tokens it had to read (small when the
+    # schema was already preloaded), read_ms, output_tokens, write_ms.
+    model: dict[str, int] = field(default_factory=dict)
+    schema_in_prompt: str = ""  # "full" (preloaded, reused) or "selected" (picked per question)
 
     @property
     def ok(self) -> bool:
@@ -68,6 +82,8 @@ class Assistant:
         self.samples = SampleCache(self.db, cfg.sample_rows)
         self._schema: SchemaInfo | None = None
         self._retriever: TableRetriever | None = None
+        self._prefix: str | None = None  # fixed rules + full schema, identical for every question
+        self.preloaded = False
         self._schema_lock = threading.Lock()
         self._sql_cache: OrderedDict[str, tuple[str, list[str]]] = OrderedDict()
         self._cache_lock = threading.Lock()
@@ -87,13 +103,50 @@ class Assistant:
                                 sensitive_patterns=self.cfg.sensitive_columns)
             retriever = TableRetriever(schema, self.cfg.glossary, self.llm)
             # Swap atomically; requests in flight keep the old objects.
-            self._schema, self._retriever = schema, retriever
             self.samples.clear()
+            prefix = self._build_prefix(schema)
+            self._schema, self._retriever, self._prefix = schema, retriever, prefix
+            self.preloaded = False
             with self._cache_lock:
                 self._sql_cache.clear()
             for w in schema.warnings:
                 log.warning(w)
             return schema
+
+    def _build_prefix(self, schema: SchemaInfo) -> str | None:
+        """The whole schema as one fixed block, if it fits the model's context window."""
+        if len(schema) == 0:
+            return None
+        # Most-connected tables first: when space is short, they keep their sample rows.
+        ordered = sorted(schema.tables.values(), key=lambda t: (-len(schema.neighbours(t)), t.key))
+        budget = schema_char_budget(self.cfg.num_ctx, self.cfg.glossary)
+        text = render_schema(schema, ordered, self.samples, budget, require_all=True)
+        if text is None:
+            log.warning("The schema (%d tables) is too big to preload into a %d-token context; relevant "
+                        "tables will be picked per question. Raise num_ctx to preload it all.",
+                        len(schema), self.cfg.num_ctx)
+            return None
+        return build_system(schema, text, self.cfg.glossary)
+
+    @property
+    def schema_preloadable(self) -> bool:
+        _ = self.schema  # load it first; before that there is nothing to judge
+        return self._prefix is not None
+
+    def preload(self) -> dict:
+        """Have the model read the schema now, so questions only pay for themselves.
+
+        Ollama keeps the processed start of the last prompt. Every question starts
+        with this same block, so after this call each question skips re-reading it.
+        """
+        _ = self.schema
+        prefix = self._prefix
+        if prefix is None:
+            return {}
+        reply = self.llm.chat(build_messages(prefix, WARM_UP_QUESTION, examples=[], history=[]),
+                              max_tokens=1, allow_empty=True)
+        self.preloaded = True
+        return dict(getattr(reply, "stats", {}) or {})
 
     # ------------------------------------------------------------------- ask
     def ask(self, question: str, history: list[dict] | None = None) -> Answer:
@@ -144,12 +197,17 @@ class Assistant:
 
         # 3. Generate with the model, feeding errors back so it can correct itself.
         t0 = time.perf_counter()
-        tables = retriever.select(ans.question, self.cfg.max_tables_in_prompt)
+        prefix = self._prefix
+        if prefix is not None:
+            system, ans.schema_in_prompt = prefix, "full"
+        else:
+            tables = retriever.select(ans.question, self.cfg.max_tables_in_prompt)
+            budget = schema_char_budget(self.cfg.num_ctx, self.cfg.glossary)
+            system = build_system(schema, render_schema(schema, tables, self.samples, budget) or "",
+                                  self.cfg.glossary)
+            ans.schema_in_prompt = "selected"
         examples = [] if history else self.examples.similar(ans.question, 3)
-        messages = build_messages(
-            ans.question, schema, tables, self.samples, glossary=self.cfg.glossary,
-            examples=examples, history=history,
-            char_budget=int((self.cfg.num_ctx - 1024) * CHARS_PER_TOKEN))
+        messages = build_messages(system, ans.question, examples=examples, history=history)
         ans.timings_ms["prompt"] = _ms(t0)
 
         last_problem = ""
@@ -157,8 +215,10 @@ class Assistant:
         for attempt in range(1, self.cfg.max_retries + 2):
             ans.attempts = attempt
             t1 = time.perf_counter()
-            reply = self.llm.chat(messages)
+            reply = self.llm.chat(messages, max_tokens=MAX_SQL_TOKENS, stop=SQL_STOP)
             llm_ms += _ms(t1)
+            for key, value in (getattr(reply, "stats", None) or {}).items():
+                ans.model[key] = ans.model.get(key, 0) + value
             messages.append({"role": "assistant", "content": reply})
 
             if reply.strip().upper().startswith(CANNOT_ANSWER):

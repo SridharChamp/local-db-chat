@@ -147,6 +147,8 @@ def test_keeps_small_limit(schema):
     ("The query is SELECT 4 FROM t", "SELECT 4 FROM t"),
     ("```SQL\nWITH a AS (SELECT 1) SELECT * FROM a\n```", "WITH a AS (SELECT 1) SELECT * FROM a"),
     ("", ""),
+    ("```sql\nSELECT 5 FROM t", "SELECT 5 FROM t"),          # stopped before the closing fence
+    ("Sure:\n```sql\nSELECT 6", "SELECT 6"),
 ])
 def test_extract_sql(reply, expected):
     assert extract_sql(reply) == expected

@@ -18,8 +18,8 @@ the result table, and a CSV download, so a developer can check it at a glance.
 - **Read-only by design.** Every query goes through a strict SQL guard *and* a read-only database session.
 - **Precise.** The answer text is built from the result rows, so it never invents numbers. Answers you
   mark *Correct* are saved and reused, so it gets more accurate the more your team uses it.
-- **Fast.** The schema is read in batched catalog calls, sample rows load only for tables a question needs,
-  repeated questions skip the model, and the model stays loaded between questions.
+- **Fast.** The schema is loaded into the model once, when you connect. After that, each question only
+  costs the question itself. Repeated and verified questions skip the model entirely.
 - **PostgreSQL, MySQL / MariaDB, SQL Server and SQLite.**
 
 ## Quick start
@@ -198,6 +198,29 @@ variable `OLLAMA_NO_CLOUD=1` before starting Ollama.
 
 Any Ollama chat model works. Set `model:` in `config.yaml`. For very large schemas (hundreds of tables),
 also set `embed_model: nomic-embed-text` (after `ollama pull nomic-embed-text`) for better table matching.
+
+## How answers stay fast
+
+Nearly all the time in an answer is the model reading its prompt and writing SQL. The database query
+itself takes milliseconds. So the app avoids making the model read anything twice:
+
+1. **The schema is read once.** Every request starts with the same block: rules, glossary, and every
+   table with its columns, types, keys and a few sample rows. When you connect a database (and whenever
+   the app starts or the schema is refreshed), the app has the model read that block once. Ollama keeps
+   the result, so each question afterwards only adds a few dozen new tokens.
+2. **Everything that changes goes after that block:** today's date, worked examples, earlier turns and
+   the question. That keeps the block identical, so the saved work stays valid.
+3. **The model stops as soon as the SQL is complete**, and its reply length is capped.
+4. **No second model call for the answer.** The answer text is built straight from the result rows,
+   which is instant and exact.
+5. **Repeated and verified questions skip the model** and only run the SQL.
+
+Each answer shows how long the model took (hover over the chip for tokens read and written).
+If the cache is working, "read" stays small from the second question on.
+
+If the full schema doesn't fit the model's context window (`num_ctx`, default 8192 tokens, roughly
+80–100 typical tables), the app picks the relevant tables per question instead. Raise `num_ctx` to fit
+more. A bigger window uses more RAM.
 
 ## How it works
 
