@@ -28,11 +28,11 @@ def _print_table(columns: list[str], rows: list[list], limit: int = 50) -> None:
     cells = [[fmt(v) for v in r] for r in shown]
     widths = [max([len(c)] + [len(r[i]) for r in cells]) for i, c in enumerate(columns)]
     widths = [min(w, MAX_CELL) for w in widths]
-    line = "  ".join(c[:w].ljust(w) for c, w in zip(columns, widths))
+    line = "  ".join(c[:w].ljust(w) for c, w in zip(columns, widths, strict=True))
     print(line)
     print("  ".join("-" * w for w in widths))
     for r in cells:
-        print("  ".join(v.ljust(w) for v, w in zip(r, widths)))
+        print("  ".join(v.ljust(w) for v, w in zip(r, widths, strict=True)))
     if len(rows) > limit:
         print(f"... {len(rows) - limit} more rows (use --json or the web UI to see all)")
 

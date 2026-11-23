@@ -1,7 +1,7 @@
 import datetime as dt
 
-from localdbchat.engine import describe, numbers_are_grounded, Answer
 from localdbchat.db import QueryResult
+from localdbchat.engine import Answer, describe, numbers_are_grounded
 from localdbchat.llm import LLMError
 
 

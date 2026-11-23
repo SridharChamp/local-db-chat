@@ -38,7 +38,9 @@ def tokens(text: str) -> set[str]:
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
+    if len(a) != len(b):
+        return 0.0  # vectors from different embedding models are not comparable
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     na = math.sqrt(sum(x * x for x in a))
     nb = math.sqrt(sum(y * y for y in b))
     return dot / (na * nb) if na and nb else 0.0
@@ -120,7 +122,7 @@ class TableRetriever:
                     vecs: list[list[float]] = []
                     for i in range(0, len(docs), 64):  # batches keep memory and request size bounded
                         vecs.extend(self.llm.embed(docs[i:i + 64]))
-                    self._table_vecs = {t.key: v for t, v in zip(tables, vecs)}
+                    self._table_vecs = {t.key: v for t, v in zip(tables, vecs, strict=True)}
                 qv = self._q_cache.get(question)
             if qv is None:
                 qv = self.llm.embed([question])[0]

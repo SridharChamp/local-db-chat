@@ -30,13 +30,31 @@ postgres = ["psycopg[binary]>=3.1"]
 mysql = ["pymysql>=1.1"]
 mssql = ["pyodbc>=5.0"]
 all = ["psycopg[binary]>=3.1", "pymysql>=1.1", "pyodbc>=5.0"]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.urls]
+Homepage = "https://github.com/SridharChamp/local-db-chat"
+Issues = "https://github.com/SridharChamp/local-db-chat/issues"
+Changelog = "https://github.com/SridharChamp/local-db-chat/blob/main/CHANGELOG.md"
 
 [project.scripts]
 ldbc = "localdbchat.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/localdbchat"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # long SQL strings read better on one line
+
+[tool.ruff.lint.isort]
+known-first-party = ["localdbchat"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,11 +1,15 @@
 # local-db-chat
 
-**Ask your database questions in plain English, using a language model that runs on your own computer.
-No data ever leaves the machine.**
+[![tests](https://github.com/SridharChamp/local-db-chat/actions/workflows/tests.yml/badge.svg)](https://github.com/SridharChamp/local-db-chat/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Built for support teams: "How many open tickets does Acme have?", "Which orders did Ravi place last
-month?", "Top 5 products by revenue this year". Each answer comes with the exact SQL that produced it,
-the result table, and a CSV download.
+**Let your support team ask the product database questions in plain English, with a language model
+that runs on your own machine. No data ever leaves it.**
+
+Support teams spend hours a day waiting on developers for "can you check this in the database?".
+local-db-chat lets them ask directly: "How many open tickets does Acme have?", "Which orders did Ravi
+place last month?", "Is customer 4821 suspended?". Each answer comes with the exact SQL that produced it,
+the result table, and a CSV download, so a developer can check it at a glance.
 
 - **Private.** The model runs locally through [Ollama](https://ollama.com). The app refuses to send
   anything to a non-local model host and ignores proxy settings. It works with the network unplugged.
@@ -93,6 +97,40 @@ In the chat, pressing **Correct** under an answer saves that question and SQL as
 The same question is then answered instantly without the model, and similar questions get it as a
 worked example. Verified examples are stored in `.ldbc/learned.json`. Move the good ones into
 `examples:` in your config to share them with your team.
+
+## Rolling it out to a support team
+
+**Option A: on each person's computer (most private).** Install Ollama and local-db-chat on each
+machine and share one `config.yaml` (minus the password; use `LDBC_DATABASE_URL`). Each person runs
+`ldbc serve`. Needs about 8 GB of free RAM per machine for a 7B model.
+
+**Option B: one shared machine on your internal network.** Run it on a server with a GPU or plenty of
+RAM. The team uses it from their browsers:
+
+```bash
+ldbc serve --host 0.0.0.0 --port 8765
+```
+
+It prints a link with an access token. Share that link only inside your company network. Put it behind
+your VPN or reverse proxy, and never expose it to the internet.
+
+**Getting good answers from day one**
+1. Run `ldbc schema` and read what the model will see. Add `comment`s to cryptic tables and columns
+   in your database, or add terms to `glossary`.
+2. Ask the 20 questions your team asks most. Mark the correct ones **Correct**. They become instant,
+   exact answers.
+3. Move the best verified examples into `examples:` in the shared config so everyone benefits.
+
+**Hardware**
+
+| Setup | Speed per question |
+|---|---|
+| NVIDIA GPU (8 GB+) or Apple Silicon | 1–3 seconds |
+| Modern CPU only, 16 GB RAM | 10–40 seconds with a 7B model; use a 3B model for faster replies |
+
+**Ollama's own online features.** local-db-chat never sends your data anywhere. Ollama itself can
+check for updates and offers optional cloud models. To keep it fully offline, set the environment
+variable `OLLAMA_NO_CLOUD=1` before starting Ollama.
 
 ## Commands
 

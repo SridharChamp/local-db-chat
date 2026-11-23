@@ -271,7 +271,7 @@ def describe(result: QueryResult, max_rows: int) -> str:
         return f"{_label(result.columns[0])}: {'none' if value is None else value}"
     if result.row_count == 1:
         return " · ".join(f"{_label(c)}: {'none' if v is None else v}"
-                          for c, v in zip(result.columns, result.rows[0]))
+                          for c, v in zip(result.columns, result.rows[0], strict=True))
     if result.truncated:
         return (f"Showing the first {max_rows} rows; there are more. "
                 "Ask a narrower question to see a complete answer.")

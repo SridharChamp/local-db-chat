@@ -10,9 +10,12 @@ CANNOT_ANSWER = "CANNOT_ANSWER"
 
 DIALECT_NOTES = {
     "postgres": "PostgreSQL. Use LIMIT, ILIKE for case-insensitive text, DATE_TRUNC, CURRENT_DATE, INTERVAL '1 month'.",
-    "mysql": "MySQL/MariaDB. Use LIMIT, LOWER(x) LIKE LOWER(...), DATE_SUB(CURDATE(), INTERVAL 1 MONTH), DATE_FORMAT.",
-    "tsql": "SQL Server (T-SQL). Use TOP n, never LIMIT. Use GETDATE(), DATEADD(month, -1, GETDATE()), DATEDIFF, CAST(x AS date).",
-    "sqlite": "SQLite. Use LIMIT, date('now'), date('now','-1 month'), strftime('%Y-%m', col), LOWER(x) LIKE LOWER(...).",
+    "mysql": "MySQL/MariaDB. Use LIMIT, LOWER(x) LIKE LOWER(...), "
+             "DATE_SUB(CURDATE(), INTERVAL 1 MONTH), DATE_FORMAT.",
+    "tsql": "SQL Server (T-SQL). Use TOP n, never LIMIT. Use GETDATE(), "
+            "DATEADD(month, -1, GETDATE()), DATEDIFF, CAST(x AS date).",
+    "sqlite": "SQLite. Use LIMIT, date('now'), date('now','-1 month'), strftime('%Y-%m', col), "
+              "LOWER(x) LIKE LOWER(...).",
 }
 
 SYSTEM = """You translate questions into ONE read-only SQL query for {dialect_note}
