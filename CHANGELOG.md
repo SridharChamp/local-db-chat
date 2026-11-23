@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- First-run setup screen in the browser: enter database details, test, save. No config file editing.
+- The model downloads through the local Ollama with a progress bar.
+- `ldbc setup`: the same steps in the terminal.
+- `ldbc serve` opens the browser and starts even when nothing is configured yet.
+- Changing the database connection is only allowed from the machine running the app.
+
 ## 0.1.0
 
 First public release.

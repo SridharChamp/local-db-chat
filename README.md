@@ -22,27 +22,38 @@ the result table, and a CSV download, so a developer can check it at a glance.
   repeated questions skip the model, and the model stays loaded between questions.
 - **PostgreSQL, MySQL / MariaDB, SQL Server and SQLite.**
 
-## Quick start (5 minutes, with a demo database)
+## Quick start
 
-1. Install [Ollama](https://ollama.com/download) and pull a model:
+1. Install [Ollama](https://ollama.com/download), the free local model runner.
+2. Install local-db-chat (Python 3.10+), with the driver for your database:
    ```bash
-   ollama pull qwen2.5-coder:7b
+   pip install "local-db-chat[postgres] @ git+https://github.com/SridharChamp/local-db-chat.git"
    ```
-2. Install local-db-chat (Python 3.10+):
+   Use `[mysql]`, `[mssql]` or `[all]` instead of `[postgres]` as needed. SQLite needs nothing extra.
+3. Start it:
    ```bash
-   pip install git+https://github.com/SridharChamp/local-db-chat.git
-   ```
-3. Create the sample support database, check the setup, and start the chat:
-   ```bash
-   ldbc demo
-   ldbc doctor
    ldbc serve
    ```
-4. Open <http://localhost:8765> and ask *"How many open tickets are urgent?"*
+4. Your browser opens the setup screen:
+   - **Local model:** press *Download* once (a few GB, through Ollama).
+   - **Database:** choose the type, then enter host, port, database name, user and password.
+     Press *Test connection*, then *Save and start*. The app reads your schema on its own.
+5. Ask away: *"How many open tickets are urgent?"*
+
+Prefer the terminal? `ldbc setup` does the same steps there.
+Just want to try it? `ldbc demo` creates a sample support database to connect to.
+
+### Where is the model? Do I need to train it?
+
+No training is needed. The app uses a standard open coding model (default: `qwen2.5-coder:7b`,
+Apache-2.0) and gives it *your* schema at question time. One model therefore works for every database.
+The model is downloaded by Ollama from its library on first run rather than stored in this repository,
+because a model is several gigabytes, and GitHub isn't built for files that size.
 
 ## Use it with your own database
 
-Copy [`config.example.yaml`](config.example.yaml) to `config.yaml` and set `database_url`:
+The setup screen writes a `config.yaml` for you. To edit it by hand, copy
+[`config.example.yaml`](config.example.yaml) to `config.yaml` and set `database_url`:
 
 | Database | URL format | Driver |
 |---|---|---|
@@ -136,7 +147,8 @@ variable `OLLAMA_NO_CLOUD=1` before starting Ollama.
 
 | Command | What it does |
 |---|---|
-| `ldbc serve` | Web chat at <http://localhost:8765> |
+| `ldbc serve` | Web chat at <http://localhost:8765>; shows the setup screen on first run |
+| `ldbc setup` | Connect a database and download the model, step by step in the terminal |
 | `ldbc chat` | Chat in the terminal (`:sql`, `:new`, `:refresh`, `:tables`, `:quit`) |
 | `ldbc ask "question" [--sql] [--json]` | One question; `--json` is handy for scripts |
 | `ldbc schema [--samples]` | Shows exactly what the model is told about your database |

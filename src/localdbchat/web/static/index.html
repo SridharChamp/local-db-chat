@@ -23,10 +23,64 @@
         <button id="toggle-side" class="ghost only-mobile" type="button" aria-controls="sidebar">Tables</button>
         <div>
           <h1>local-db-chat</h1>
-          <p class="muted small">Runs on this computer only. Read-only access.</p>
+          <p class="muted small" id="conn-line">Runs on this computer only. Read-only access.</p>
         </div>
-        <button id="clear" class="ghost" type="button" title="Start a new conversation">New chat</button>
+        <div class="top-actions">
+          <button id="settings" class="ghost" type="button" title="Database and model setup">Setup</button>
+          <button id="clear" class="ghost" type="button" title="Start a new conversation">New chat</button>
+        </div>
       </header>
+
+      <section id="setup" class="setup" hidden>
+        <div class="setup-inner">
+          <h2 class="setup-title">Set up</h2>
+          <p class="muted">Two steps: make sure the local model is ready, then connect your database.
+            Everything stays on this computer.</p>
+
+          <div class="card" id="model-card">
+            <h3>1. Local model</h3>
+            <p id="model-text" class="muted">Checking…</p>
+            <div id="model-progress" class="progress" hidden><div id="model-bar"></div></div>
+            <div class="row">
+              <button id="model-pull" type="button" hidden>Download model</button>
+              <a id="ollama-link" class="button-link" href="https://ollama.com/download" target="_blank"
+                 rel="noopener noreferrer" hidden>Get Ollama</a>
+              <button id="model-recheck" class="ghost" type="button">Check again</button>
+            </div>
+          </div>
+
+          <form class="card" id="db-form" autocomplete="off">
+            <h3>2. Database</h3>
+            <label>Type
+              <select id="f-kind" name="kind"></select>
+            </label>
+            <div id="server-fields">
+              <div class="grid2">
+                <label>Host<input id="f-host" name="host" placeholder="db.example.internal" spellcheck="false"></label>
+                <label>Port<input id="f-port" name="port" type="number" min="1" max="65535"></label>
+              </div>
+              <label>Database name<input id="f-database" name="database" spellcheck="false"></label>
+              <div class="grid2">
+                <label>User<input id="f-user" name="user" spellcheck="false" autocomplete="off"></label>
+                <label>Password<input id="f-password" name="password" type="password" autocomplete="new-password"></label>
+              </div>
+              <label class="check" id="ssl-wrap"><input id="f-ssl" type="checkbox"> Require an encrypted (TLS) connection</label>
+              <label class="check" id="trust-wrap" hidden><input id="f-trust" type="checkbox"> Trust the server certificate (self-signed)</label>
+            </div>
+            <div id="file-fields" hidden>
+              <label>Path to the .db file<input id="f-path" name="path" placeholder="C:\data\app.db" spellcheck="false"></label>
+            </div>
+            <p class="muted small">Use a <strong>read-only</strong> database user. The connection is saved in
+              config.yaml on this computer only.</p>
+            <p id="db-msg" class="msg-line" role="status"></p>
+            <div class="row">
+              <button id="db-test" class="ghost" type="button">Test connection</button>
+              <button id="db-save" type="submit">Save and start</button>
+              <button id="setup-close" class="ghost" type="button" hidden>Back to chat</button>
+            </div>
+          </form>
+        </div>
+      </section>
 
       <section id="log" class="log" aria-live="polite">
         <div class="empty" id="empty">

@@ -245,6 +245,147 @@
   $("filter").addEventListener("input", drawTables);
   $("refresh").onclick = () => loadSchema(true);
   $("toggle-side").onclick = () => $("sidebar").classList.toggle("open");
-  loadSchema(false);
-  q.focus();
+
+  // ----------------------------------------------------------------- setup
+  let status = null;
+  let pullTimer = null;
+
+  function showSetup(on) {
+    $("setup").hidden = !on;
+    log.hidden = on;
+    form.hidden = on;
+    $("setup-close").hidden = !(status && status.configured);
+  }
+
+  function fillKinds(kinds) {
+    const sel = $("f-kind");
+    if (sel.options.length) return;
+    kinds.forEach(k => { const o = el("option", "", k.label); o.value = k.kind; sel.appendChild(o); });
+    sel.onchange = kindChanged;
+    kindChanged();
+  }
+
+  function kindChanged() {
+    const kind = $("f-kind").value;
+    const info = (status?.kinds || []).find(k => k.kind === kind);
+    $("server-fields").hidden = kind === "sqlite";
+    $("file-fields").hidden = kind !== "sqlite";
+    $("ssl-wrap").hidden = kind === "mssql";
+    $("trust-wrap").hidden = kind !== "mssql";
+    $("f-port").placeholder = info && info.port ? String(info.port) : "";
+    setMsg("");
+  }
+
+  function setMsg(text, kind) {
+    const m = $("db-msg");
+    m.textContent = text;
+    m.className = "msg-line" + (kind ? " " + kind : "");
+  }
+
+  function connectionBody() {
+    const port = $("f-port").value.trim();
+    return {
+      kind: $("f-kind").value, host: $("f-host").value.trim(), port: port ? Number(port) : null,
+      database: $("f-database").value.trim(), user: $("f-user").value.trim(), password: $("f-password").value,
+      path: $("f-path").value.trim(), ssl: $("f-ssl").checked, trust_certificate: $("f-trust").checked,
+    };
+  }
+
+  function drawModel(s) {
+    const text = $("model-text"), pullBtn = $("model-pull"), link = $("ollama-link");
+    const p = s.pull || {};
+    pullBtn.hidden = true; link.hidden = true; $("model-progress").hidden = true;
+    text.className = "muted";
+    if (p.running) {
+      const pct = p.total ? Math.floor(p.completed / p.total * 100) : 0;
+      text.textContent = `Downloading ${s.model}: ${p.status}${p.total ? ` ${pct}% of ${(p.total / 1e9).toFixed(1)} GB` : ""}`;
+      $("model-progress").hidden = false;
+      $("model-bar").style.width = pct + "%";
+      return;
+    }
+    if (!s.ollama_running) {
+      text.textContent = "Ollama is not running on this computer. Install it, start it, then press Check again. " + (s.ollama_error || "");
+      link.hidden = false;
+      return;
+    }
+    if (!s.model_installed) {
+      text.textContent = (p.error ? p.error + " " : "") +
+        `The model ${s.model} is not downloaded yet. It is a one-time download of a few GB through Ollama.`;
+      pullBtn.textContent = `Download ${s.model}`;
+      pullBtn.hidden = false;
+      return;
+    }
+    text.textContent = `Ready: ${s.model} is installed.`;
+    text.className = "ok-text";
+  }
+
+  async function refreshStatus() {
+    try { status = await api("/api/status"); }
+    catch (e) { $("model-text").textContent = e.message; return null; }
+    fillKinds(status.kinds);
+    drawModel(status);
+    $("conn-line").textContent = status.configured
+      ? `Connected to ${status.database}. Read-only. Runs on this computer only.`
+      : "Not connected yet. Runs on this computer only.";
+    if (status.pull && status.pull.running) {
+      clearTimeout(pullTimer);
+      pullTimer = setTimeout(refreshStatus, 1500);
+    }
+    return status;
+  }
+
+  $("model-recheck").onclick = refreshStatus;
+  $("model-pull").onclick = async () => {
+    $("model-pull").disabled = true;
+    try { await api("/api/model/pull", {}); } catch (e) { alert(e.message); }
+    $("model-pull").disabled = false;
+    refreshStatus();
+  };
+
+  $("db-test").onclick = async () => {
+    setMsg("Testing…");
+    $("db-test").disabled = true;
+    try {
+      const r = await api("/api/setup/test", connectionBody());
+      setMsg(r.message, r.ok ? "good" : "bad");
+    } catch (e) { setMsg(e.message, "bad"); }
+    finally { $("db-test").disabled = false; }
+  };
+
+  $("db-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setMsg("Connecting and reading the schema…");
+    $("db-save").disabled = true;
+    try {
+      const r = await api("/api/setup/save", connectionBody());
+      $("f-password").value = "";
+      const s = await refreshStatus();
+      history = [];
+      loadSchema(false);
+      if (s && !s.model_installed) {
+        setMsg(r.message + " Now download the model above to start asking questions.", "good");
+        $("setup-close").hidden = false;
+        return;
+      }
+      setMsg(r.message, "good");
+      showSetup(false);
+      $("clear").click();
+    } catch (err) { setMsg(err.message, "bad"); }
+    finally { $("db-save").disabled = false; }
+  });
+
+  $("settings").onclick = async () => { await refreshStatus(); showSetup(true); };
+  $("setup-close").onclick = () => showSetup(false);
+
+  (async function boot() {
+    const s = await refreshStatus();
+    if (!s || !s.configured || !s.model_installed) {
+      showSetup(true);
+      if (s && s.configured) loadSchema(false);
+      return;
+    }
+    showSetup(false);
+    loadSchema(false);
+    q.focus();
+  })();
 })();

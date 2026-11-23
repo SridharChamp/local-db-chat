@@ -68,6 +68,42 @@ class OllamaClient:
             raise LLMError(f"Could not reach Ollama at {self.url}: {exc}") from exc
         return [m.get("name", "") for m in resp.json().get("models", [])]
 
+    def has_model(self, name: str | None = None) -> bool:
+        name = name or self.model
+        wanted = {name, f"{name}:latest"} if ":" not in name else {name}
+        return any(m in wanted for m in self.list_models())
+
+    def pull(self, name: str | None = None, on_progress=None) -> None:
+        """Download a model through the local Ollama (it fetches from its own library).
+
+        on_progress(status: str, completed: int, total: int) is called as data arrives.
+        """
+        import json
+
+        name = name or self.model
+        try:
+            with self._http.stream("POST", "/api/pull", json={"model": name, "stream": True},
+                                   timeout=httpx.Timeout(None, connect=5.0)) as resp:
+                if resp.status_code >= 400:
+                    resp.read()
+                    raise LLMError(f"Could not download '{name}': {resp.text[:300]}")
+                for line in resp.iter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if event.get("error"):
+                        raise LLMError(f"Could not download '{name}': {event['error']}")
+                    if on_progress:
+                        on_progress(event.get("status", ""), int(event.get("completed") or 0),
+                                    int(event.get("total") or 0))
+        except httpx.ConnectError as exc:
+            raise LLMError(self._not_running()) from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"Download of '{name}' was interrupted: {exc}. Run it again to resume.") from exc
+
     def warm_up(self) -> None:
         """Load the model into memory now, so the first question is not slow."""
         self._post("/api/generate", {"model": self.model, "prompt": "", "keep_alive": self.keep_alive},
