@@ -135,10 +135,21 @@ def retry_message(problem: str) -> dict:
             f"If the tables really cannot answer the question, reply with {CANNOT_ANSWER} and the reason."}
 
 
-EXPLAIN = """Question: {question}
-Columns: {columns}
-Rows ({count}{more}):
+EXPLAIN = """A support colleague asked: {question}
+
+This query was run to answer it:
+{sql}
+
+Result columns: {columns}
+Result rows ({count}{more}):
 {rows}
 
-Answer the question in one or two plain sentences using ONLY these rows.
-Copy numbers exactly as shown. Do not guess or add numbers. Do not mention SQL."""
+Write the answer to the colleague in one or two short, natural sentences.
+- Answer the question directly. Start with the answer, not with "Based on".
+- Use the names and numbers exactly as they appear in the result. Do not round, convert or add numbers.
+- If the query filters the data in a way the question did not say (for example only paid orders),
+  mention it briefly.
+- If there are many rows, say what the list shows (for example "Here are the 10 most recent urgent
+  tickets.") instead of reading them all out.
+- If there are no rows, say plainly that nothing matched.
+- No currency symbols unless they are in the result. Do not mention SQL, tables or columns."""

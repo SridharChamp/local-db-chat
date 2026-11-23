@@ -41,7 +41,7 @@ model: qwen2.5-coder:7b
 embed_model: ""        # e.g. nomic-embed-text, helps with very large schemas
 num_ctx: 8192
 keep_alive: 30m
-explain_answers: false # extra sentence from the model; numbers are checked against the data
+explain_answers: true  # model writes the answer sentence; any number not in the data rejects it
 
 # --- Business vocabulary ----------------------------------------------------
 glossary:

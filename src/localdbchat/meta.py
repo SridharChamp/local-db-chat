@@ -60,19 +60,29 @@ def answer_schema_question(question: str, schema: SchemaInfo) -> MetaAnswer | No
             return None
         cols = table.visible_columns
         if _COUNT.search(q):
-            return MetaAnswer(f"{table.full_name} has {len(cols)} columns.", *_column_rows(table))
-        return MetaAnswer(f"{table.full_name} has {len(cols)} columns:", *_column_rows(table))
+            return MetaAnswer(f"The {table.full_name} {table.kind} has {len(cols)} columns.", *_column_rows(table))
+        return MetaAnswer(f"The {table.full_name} {table.kind} has {len(cols)} columns: "
+                          f"{_join([c.name for c in cols])}.", *_column_rows(table))
 
     if _HOW_MANY_TABLES.search(q):
         n_tables = sum(1 for t in tables if t.kind == "table")
         n_views = len(tables) - n_tables
-        text = f"There are {n_tables} tables" + (f" and {n_views} views" if n_views else "") + "."
-        return MetaAnswer(text, *_table_rows(tables))
+        text = f"There are {n_tables} tables" + (f" and {n_views} views" if n_views else "")
+        return MetaAnswer(f"{text}: {_join([t.full_name for t in tables])}.", *_table_rows(tables))
 
     if _LIST_TABLES.search(q) and not _mentioned_table(q, schema):
-        return MetaAnswer(f"The database has {len(tables)} tables and views you can ask about:",
+        return MetaAnswer(f"You can ask about these {len(tables)} tables: {_join([t.full_name for t in tables])}.",
                           *_table_rows(tables))
     return None
+
+
+def _join(names: list[str], limit: int = 12) -> str:
+    """'a, b and c'; long lists end with 'and N more'."""
+    if len(names) > limit:
+        return ", ".join(names[:limit - 2]) + f" and {len(names) - (limit - 2)} more (listed below)"
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def _table_rows(tables: list[Table]) -> tuple[list[str], list[list]]:

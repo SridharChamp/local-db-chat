@@ -16,8 +16,10 @@ the result table, and a CSV download, so a developer can check it at a glance.
 - **Learns your schema on its own.** It reads tables, views, columns, keys and comments from the
   database catalog at startup, and again whenever you press *Refresh*.
 - **Read-only by design.** Every query goes through a strict SQL guard *and* a read-only database session.
-- **Precise.** The answer text is built from the result rows, so it never invents numbers. Answers you
-  mark *Correct* are saved and reused, so it gets more accurate the more your team uses it.
+- **Clear, checked answers.** You get a plain sentence ("We have 90 active customers.", "Aisha has
+  closed the most tickets, with 32.") with the result table and the SQL under it. Every number in the
+  sentence is checked against the result. If one doesn't match, the sentence is dropped and the exact
+  figure is shown instead. Answers you mark *Correct* are saved and reused, so accuracy grows with use.
 - **Fast.** The schema is loaded into the model once, when you connect. After that, each question only
   costs the question itself. Repeated and verified questions skip the model entirely.
 - **PostgreSQL, MySQL / MariaDB, SQL Server and SQLite.**
@@ -220,8 +222,8 @@ itself takes milliseconds. So the app avoids making the model read anything twic
 2. **Everything that changes goes after that block:** today's date, worked examples, earlier turns and
    the question. That keeps the block identical, so the saved work stays valid.
 3. **The model stops as soon as the SQL is complete**, and its reply length is capped.
-4. **No second model call for the answer.** The answer text is built straight from the result rows,
-   which is instant and exact.
+4. **The table shows first.** The written sentence follows a moment later. That request continues the
+   same conversation, so the cached schema survives for the next question.
 5. **Repeated and verified questions skip the model** and only run the SQL.
 
 Each answer shows how long the model took (hover over the chip for tokens read and written).

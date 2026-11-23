@@ -36,6 +36,11 @@ SQL_CACHE_SIZE = 256
 MAX_SQL_TOKENS = 512          # a reply longer than this is rambling, not SQL
 SQL_STOP = ["\n```\n"]        # stop right after the closing fence; never pay for explanations
 _NUMBER = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+# Digit grouping that reads correctly: Western 2,799,425 or Indian 27,99,425.
+_GROUPED = re.compile(r"^-?(?:\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d+)?$")
+_CURRENCY = ("$", "₹", "€", "£", "¥", "Rs.", "INR", "USD", "EUR")
+EXPLAIN_MAX_ROWS = 20
+EXPLAIN_MAX_TOKENS = 120
 
 
 @dataclass
@@ -60,6 +65,7 @@ class Answer:
     model: dict[str, int] = field(default_factory=dict)
     schema_in_prompt: str = ""  # "full" (preloaded, reused) or "selected" (picked per question)
     source: str = ""            # "schema" when answered from the known structure, no query run
+    articulated: bool = False   # answer text written by the model and checked against the data
 
     @property
     def ok(self) -> bool:
@@ -151,7 +157,9 @@ class Assistant:
         return dict(getattr(reply, "stats", {}) or {})
 
     # ------------------------------------------------------------------- ask
-    def ask(self, question: str, history: list[dict] | None = None) -> Answer:
+    def ask(self, question: str, history: list[dict] | None = None, *, explain: bool | None = None) -> Answer:
+        """Answer a question. explain=False skips the written sentence (the web UI asks for it
+        separately so the table shows first); None follows the explain_answers setting."""
         started = time.perf_counter()
         question = (question or "").strip()
         ans = Answer(question=question)
@@ -170,6 +178,11 @@ class Assistant:
                 ans.error = "No tables are available. " + " ".join(schema.warnings)
                 return ans
             self._answer(ans, schema, retriever, history)
+            want = self.cfg.explain_answers if explain is None else explain
+            if want and ans.ok and ans.sql and ans.source != "schema":
+                t = time.perf_counter()
+                self._explain(ans)
+                ans.timings_ms["explain"] = _ms(t)
         except (DatabaseError, LLMError) as exc:
             ans.error = str(exc)
         except Exception:  # never let one bad question take the service down
@@ -278,8 +291,7 @@ class Assistant:
 
         ans.timings_ms["llm"] = llm_ms
         ans.timings_ms["db"] = db_ms
-        if ans.ok and self.cfg.explain_answers and ans.rows:
-            self._explain(ans)
+
 
     def _try_known(self, ans: Answer, schema: SchemaInfo, sql: str, *, verified: bool) -> bool:
         """Run SQL we already trust. False if the schema moved on and it no longer fits."""
@@ -303,19 +315,42 @@ class Assistant:
         ans.row_count, ans.truncated = result.row_count, result.truncated
         ans.answer = describe(result, self.cfg.max_rows)
 
-    def _explain(self, ans: Answer) -> None:
-        shown = ans.rows[:20]
+    def articulate(self, question: str, sql: str, columns: list[str], rows: list[list],
+                   row_count: int, truncated: bool) -> str | None:
+        """One or two plain sentences answering the question from these rows.
+
+        Returns None when the model's sentence cannot be trusted: any number or
+        currency in it that is not in the result, question or SQL rejects it, and
+        the exact data-built answer stays. A wrong number is worse than no prose.
+        """
+        shown = rows[:EXPLAIN_MAX_ROWS]
         prompt = EXPLAIN.format(
-            question=ans.question, columns=", ".join(ans.columns), count=ans.row_count,
-            more=", more not shown" if ans.truncated or len(ans.rows) > 20 else "",
-            rows="\n".join(" | ".join("NULL" if v is None else str(v) for v in r) for r in shown))
+            question=question[:MAX_QUESTION_CHARS], sql=sql[:4000], columns=", ".join(columns[:30]),
+            count=row_count, more=", more exist" if truncated else "",
+            rows="\n".join(" | ".join("NULL" if v is None else str(v)[:80] for v in r[:30]) for r in shown)
+            or "(no rows)")
+        prefix = self._prefix
+        if prefix is not None:
+            # Continue the conversation that starts with the preloaded schema block. A separate
+            # prompt would push that block out of Ollama's cache and slow down the next question.
+            messages = build_messages(prefix, question, examples=[], history=[])
+            messages += [{"role": "assistant", "content": f"```sql\n{sql}\n```"},
+                         {"role": "user", "content": prompt}]
+        else:
+            messages = [{"role": "user", "content": prompt}]
         try:
-            text = self.llm.chat([{"role": "user", "content": prompt}]).strip()
+            text = self.llm.chat(messages, max_tokens=EXPLAIN_MAX_TOKENS)
         except LLMError:
-            return
-        if numbers_are_grounded(text, ans):
-            ans.answer = text
-        # Otherwise keep the exact, data-built answer: a wrong number is worse than no prose.
+            return None
+        text = " ".join(str(text).split()).strip().strip('"')
+        if not text or len(text) > 600 or text.upper().startswith(("SELECT", "WITH", "```", CANNOT_ANSWER)):
+            return None
+        return text if is_grounded(text, question, sql, rows, row_count) else None
+
+    def _explain(self, ans: Answer) -> None:
+        text = self.articulate(ans.question, ans.sql, ans.columns, ans.rows, ans.row_count, ans.truncated)
+        if text:
+            ans.answer, ans.articulated = text, True
 
     # -------------------------------------------------------------- feedback
     def confirm(self, question: str, sql: str) -> None:
@@ -335,29 +370,45 @@ class Assistant:
         self.db.dispose()
 
 
+_GENERIC_LABELS = {"n", "count", "cnt", "total", "value", "result", "count(*)", "num", "number", "sum"}
+
+
 def describe(result: QueryResult, max_rows: int) -> str:
     """A plain answer built only from the rows, so it can never invent a number."""
     if result.row_count == 0:
-        return "No matching records found."
+        return "Nothing matched your question."
     if result.row_count == 1 and len(result.columns) == 1:
         value = result.rows[0][0]
-        return f"{_label(result.columns[0])}: {'none' if value is None else value}"
+        shown = "none" if value is None else value
+        if result.columns[0].strip().lower() in _GENERIC_LABELS:
+            return f"The answer is {shown}."
+        return f"{_label(result.columns[0])}: {shown}"
     if result.row_count == 1:
         return " · ".join(f"{_label(c)}: {'none' if v is None else v}"
                           for c, v in zip(result.columns, result.rows[0], strict=True))
     if result.truncated:
-        return (f"Showing the first {max_rows} rows; there are more. "
-                "Ask a narrower question to see a complete answer.")
-    return f"Found {result.row_count} rows."
+        return (f"Here are the first {max_rows} results. There are more, so ask a narrower question "
+                "to see them all.")
+    return f"Here are the {result.row_count} matching results."
+
+
+def is_grounded(text: str, question: str, sql: str, rows: list[list], row_count: int) -> bool:
+    """Every number and currency symbol in `text` must come from the data, question or SQL."""
+    sources = [question, sql, str(row_count), str(len(rows))]
+    sources += [str(v) for row in rows for v in row]
+    allowed = {_norm_num(n) for src in sources for n in _NUMBER.findall(src)}
+    for n in _NUMBER.findall(text):
+        n = n.rstrip(",")  # a comma ending a clause is punctuation, not part of the number
+        if "," in n and not _GROUPED.match(n):
+            return False  # misplaced separators ("279,9425") misstate the number
+        if _norm_num(n) not in allowed:
+            return False
+    joined = " ".join(sources)
+    return all(sym not in text or sym in joined for sym in _CURRENCY)
 
 
 def numbers_are_grounded(text: str, ans: Answer) -> bool:
-    allowed = {_norm_num(n) for n in _NUMBER.findall(ans.question)}
-    allowed.add(_norm_num(str(ans.row_count)))
-    for row in ans.rows:
-        for v in row:
-            allowed |= {_norm_num(n) for n in _NUMBER.findall(str(v))}
-    return all(_norm_num(n) in allowed for n in _NUMBER.findall(text))
+    return is_grounded(text, ans.question, ans.sql, ans.rows, ans.row_count)
 
 
 def _norm_num(n: str) -> str:

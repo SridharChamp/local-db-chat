@@ -1,5 +1,7 @@
 import datetime as dt
 
+import pytest
+
 from localdbchat.db import QueryResult
 from localdbchat.engine import Answer, describe, numbers_are_grounded
 from localdbchat.llm import LLMError
@@ -193,10 +195,12 @@ def test_bad_history_is_ignored(make_assistant):
 
 
 def test_answer_text_comes_from_data():
-    assert describe(QueryResult(["n"], [], False, 0), 50) == "No matching records found."
+    assert describe(QueryResult(["n"], [], False, 0), 50) == "Nothing matched your question."
+    assert describe(QueryResult(["count"], [[42]], False, 0), 50) == "The answer is 42."
+    assert describe(QueryResult(["a"], [[1], [2], [3]], False, 0), 50) == "Here are the 3 matching results."
     assert describe(QueryResult(["total_amount"], [["1499.00"]], False, 0), 50) == "Total amount: 1499.00"
     assert describe(QueryResult(["a", "b"], [[1, None]], False, 0), 50) == "A: 1 · B: none"
-    assert "first 50" in describe(QueryResult(["a"], [[1]] * 50, True, 0), 50)
+    assert "first 50 results" in describe(QueryResult(["a"], [[1]] * 50, True, 0), 50)
 
 
 def test_explanations_with_invented_numbers_are_dropped(make_assistant):
@@ -206,7 +210,8 @@ def test_explanations_with_invented_numbers_are_dropped(make_assistant):
     a, _ = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents"), "There are 7 agents."],
                           explain_answers=True)
     out = a.ask("How many agents?")
-    assert out.answer == "N: 4"  # the made-up 7 was rejected
+    assert out.answer == "The answer is 4."  # the made-up 7 was rejected; exact answer kept
+    assert not out.articulated
 
 
 def test_schema_changes_are_picked_up_by_refresh(make_assistant, demo_db):
@@ -228,3 +233,45 @@ def test_retrieval_picks_relevant_tables(make_assistant):
     assert "support_tickets" in names and "agents" in names
     names = [t.name for t in retriever.select("total revenue by product", 3)]
     assert "products" in names
+
+
+# ------------------------------------------------------------ written answers
+def test_articulated_answer_is_used_when_grounded(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents"), "You have 4 support agents."],
+                            explain_answers=True)
+    ans = a.ask("How many agents do we have?")
+    assert ans.answer == "You have 4 support agents." and ans.articulated
+    # The sentence request continues the conversation that starts with the preloaded schema,
+    # so Ollama's cached schema block survives for the next question.
+    assert llm.calls[1][0]["content"].startswith(a._prefix)
+    assert llm.calls[1][-2] == {"role": "assistant", "content": f"```sql\n{ans.sql}\n```"}
+
+
+@pytest.mark.parametrize("sentence", [
+    "Total revenue is $2255756.",       # currency not in the data
+    "Total revenue is about 2.3 million.",  # rounded number
+    "SELECT SUM(total_amount) FROM orders",  # SQL instead of a sentence
+])
+def test_untrustworthy_sentences_are_rejected(make_assistant, sentence):
+    a, _ = make_assistant([fenced("SELECT ROUND(SUM(total_amount), 2) AS revenue FROM orders WHERE status = 'paid'"),
+                           sentence], explain_answers=True)
+    ans = a.ask("What is our total revenue?")
+    assert ans.ok and not ans.articulated and ans.answer.startswith("Revenue: ")
+
+
+def test_grounding_accepts_formatting_and_sql_numbers():
+    from localdbchat.engine import is_grounded
+    rows = [["2255756.0"]]
+    assert is_grounded("Total paid revenue is 2,255,756.", "total revenue?", "SELECT ...", rows, 1)
+    assert is_grounded("Here are the 10 most recent tickets.", "recent tickets", "SELECT ... LIMIT 10",
+                       [[1]] * 10, 10)
+    assert not is_grounded("There are 11 tickets.", "q", "SELECT 1", [[10]], 1)
+    # digit grouping must be real: Western and Indian styles pass, misplaced commas fail
+    assert is_grounded("Revenue is 27,99,425.", "q", "SELECT 1", [[2799425]], 1)
+    assert is_grounded("Revenue is 2,799,425, all orders included.", "q", "SELECT 1", [[2799425]], 1)
+    assert not is_grounded("Revenue is 279,9425.", "q", "SELECT 1", [[2799425]], 1)
+
+
+def test_schema_answers_never_call_the_model_for_a_sentence(make_assistant):
+    a, llm = make_assistant([], explain_answers=True)
+    assert a.ask("how many tables are there?").ok and llm.calls == []

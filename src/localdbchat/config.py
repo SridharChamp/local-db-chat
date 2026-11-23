@@ -35,7 +35,7 @@ class Config:
     num_ctx: int = 8192           # model context window; Ollama's own default is too small
     keep_alive: str = "30m"       # keep the model loaded between questions (speed)
     llm_timeout_seconds: int = 120
-    explain_answers: bool = False  # extra model call to describe results in words
+    explain_answers: bool = True   # model writes the answer sentence; numbers are checked against the data
     learned_examples_file: str = ".ldbc/learned.json"
     max_learned_examples: int = 500
     allow_remote_llm: bool = False  # safety: refuse non-loopback Ollama hosts unless set

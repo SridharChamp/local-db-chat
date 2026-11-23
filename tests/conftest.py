@@ -58,6 +58,7 @@ def make_assistant(demo_db, tmp_path):
     made = []
 
     def _make(replies=None, **overrides):
+        overrides.setdefault("explain_answers", False)  # tests script each model reply; opt in to the sentence
         cfg = Config(database_url=f"sqlite:///{demo_db.as_posix()}", max_rows=50, timeout_seconds=5,
                      learned_examples_file=str(tmp_path / "learned.json"), **overrides)
         llm = FakeLLM(replies)

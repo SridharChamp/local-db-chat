@@ -175,6 +175,32 @@
     return wrap;
   }
 
+  // Fill in the written sentence after the table is already on screen.
+  async function articulate(a, node) {
+    const line = node.querySelector(".answer");
+    if (!line) return;
+    const exact = line.textContent;
+    line.classList.add("pending-text");
+    line.title = "Writing the answer…";
+    try {
+      const r = await api("/api/explain", {
+        question: a.question, sql: a.sql, columns: a.columns, rows: a.rows.slice(0, 20),
+        row_count: a.row_count, truncated: a.truncated,
+      });
+      if (r.answer) {
+        line.textContent = r.answer;
+        line.title = "Written by the model and checked: every number in it is in the result. " +
+          "Exact result: " + exact;
+      } else {
+        line.title = "";
+      }
+    } catch (_) {
+      line.title = "";  // keep the exact, data-built answer
+    } finally {
+      line.classList.remove("pending-text");
+    }
+  }
+
   async function ask(question) {
     if (busy) return;
     question = question.trim();
@@ -185,7 +211,9 @@
     pending.querySelector(".bubble").appendChild(el("div", "thinking", "Working on it..."));
     try {
       const a = await api("/api/ask", { question, history });
-      pending.replaceWith(renderAnswer(a));
+      const node = renderAnswer(a);
+      pending.replaceWith(node);
+      if (a.explain_pending) articulate(a, node);
       if (a.ok && a.sql) {
         history.push({ question, sql: a.sql });
         if (history.length > MAX_HISTORY) history = history.slice(-MAX_HISTORY);

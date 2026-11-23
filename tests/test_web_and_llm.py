@@ -91,3 +91,14 @@ def test_llm_not_running_message():
     with pytest.raises(LLMError, match="not running"):
         client.chat([{"role": "user", "content": "hi"}])
     client.close()
+
+
+def test_table_first_then_sentence(make_assistant):
+    a, llm = make_assistant(["```sql\nSELECT COUNT(*) AS n FROM agents\n```", "There are 4 agents."],
+                            explain_answers=True)
+    c = TestClient(create_app(a), base_url="http://127.0.0.1:8765")
+    first = c.post("/api/ask", json={"question": "How many agents?"}).json()
+    assert first["ok"] and first["explain_pending"] and first["answer"] == "The answer is 4."
+    assert len(llm.calls) == 1  # the sentence was not written yet: the table shows immediately
+    body = {k: first[k] for k in ("question", "sql", "columns", "rows", "row_count", "truncated")}
+    assert c.post("/api/explain", json=body).json() == {"answer": "There are 4 agents."}

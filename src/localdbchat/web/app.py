@@ -51,6 +51,15 @@ class FeedbackRequest(BaseModel):
     correct: bool
 
 
+class ExplainRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    sql: str = Field(min_length=1, max_length=20_000)
+    columns: list[str] = Field(max_length=200)
+    rows: list[list] = Field(max_length=1000)
+    row_count: int = Field(ge=0)
+    truncated: bool = False
+
+
 class ConnectionRequest(BaseModel):
     kind: Literal["postgresql", "mysql", "mssql", "sqlite"]
     host: str = Field(default="", max_length=255)
@@ -281,9 +290,22 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
             return JSONResponse({"error": "Busy answering other questions. Try again in a moment."},
                                 status_code=429)
         async with limiter:
-            # The model and the database calls block; run them off the event loop.
-            answer = await asyncio.to_thread(a.ask, body.question, [t.model_dump() for t in body.history])
-        return answer.to_dict()
+            # The model and the database calls block; run them off the event loop. The written
+            # sentence is fetched separately (/api/explain) so the table shows without waiting.
+            answer = await asyncio.to_thread(a.ask, body.question, [t.model_dump() for t in body.history],
+                                             explain=False)
+        out = answer.to_dict()
+        out["explain_pending"] = bool(a.cfg.explain_answers and answer.ok and answer.sql
+                                      and answer.source != "schema")
+        return out
+
+    @app.post("/api/explain")
+    async def explain(body: ExplainRequest):
+        a = current()
+        async with limiter:
+            text = await asyncio.to_thread(a.articulate, body.question, body.sql, body.columns, body.rows,
+                                           body.row_count, body.truncated)
+        return {"answer": text}
 
     @app.post("/api/feedback")
     async def feedback(body: FeedbackRequest):

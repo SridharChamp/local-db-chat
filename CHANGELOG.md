@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Answers are written as plain sentences ("We have 90 active customers."). Every number in a sentence
+  must appear in the result, with correct digit grouping, and no currency the data doesn't have.
+  Otherwise the exact data-built answer is kept.
+- The web UI shows the result table first and fills in the sentence a moment later.
+- Questions about the structure ("How many tables are there?", "What columns does orders have?") are
+  answered from the loaded schema, instantly and in full sentences.
+
 - Faster answers: the full schema is loaded into the model once when you connect (and on start or
   refresh). Every question reuses that work, so each one only pays for itself.
 - The model stops right after the SQL, with a capped reply length.

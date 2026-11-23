@@ -12,7 +12,8 @@ from localdbchat.meta import answer_schema_question
 ])
 def test_how_many_tables(q, schema):
     ans = answer_schema_question(q, schema)
-    assert ans is not None and ans.answer == "There are 6 tables."
+    assert ans is not None
+    assert ans.answer == "There are 6 tables: agents, customers, order_items, orders, products and support_tickets."
     assert [r[0] for r in ans.rows] == ["agents", "customers", "order_items", "orders", "products", "support_tickets"]
 
 
@@ -37,13 +38,13 @@ def test_list_tables(q, schema):
 ])
 def test_columns_of_a_table(q, table, schema):
     ans = answer_schema_question(q, schema)
-    assert ans is not None and ans.answer.startswith(f"{table} has")
+    assert ans is not None and ans.answer.startswith(f"The {table} table has")
     assert ans.columns == ["column", "type", "can be empty", "notes"]
 
 
 def test_how_many_columns(schema):
     ans = answer_schema_question("how many columns are in customers?", schema)
-    assert ans.answer == "customers has 7 columns."  # password_hash is protected and not counted
+    assert ans.answer == "The customers table has 7 columns."  # password_hash is protected and not counted
 
 
 def test_protected_columns_are_never_listed(schema):
@@ -79,4 +80,10 @@ def test_engine_answers_without_model_or_query(make_assistant):
     a, llm = make_assistant([])
     ans = a.ask("how many tables are there in this DB")
     assert ans.ok and ans.source == "schema" and ans.sql == "" and llm.calls == []
-    assert ans.answer == "There are 6 tables."
+    assert ans.answer.startswith("There are 6 tables: agents, ")
+
+
+def test_column_list_reads_naturally(schema):
+    ans = answer_schema_question("what columns does orders have", schema)
+    assert ans.answer == ("The orders table has 5 columns: order_id, customer_id, order_date, "
+                          "status and total_amount.")
