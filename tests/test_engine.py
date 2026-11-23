@@ -96,7 +96,7 @@ def test_glossary_reaches_the_prompt(make_assistant):
     a, llm = make_assistant([fenced("SELECT COUNT(*) FROM customers WHERE status = 'C'")],
                             glossary={"churned customer": "customers.status = 'C'"})
     assert a.ask("How many churned customers?").ok
-    assert "churned customer: customers.status = 'C'" in llm.calls[0][0]["content"]
+    assert "\"churned customer\" means: customers.status = 'C'" in llm.calls[0][0]["content"]
 
 
 def test_retries_after_unknown_column(make_assistant):
