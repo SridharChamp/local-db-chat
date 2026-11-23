@@ -13,6 +13,7 @@ from .config import Config
 from .db import Database, DatabaseError, QueryResult
 from .llm import LLMError, OllamaClient
 from .memory import ExampleStore, normalise
+from .meta import answer_schema_question
 from .prompts import (
     CANNOT_ANSWER,
     EXPLAIN,
@@ -58,6 +59,7 @@ class Answer:
     # schema was already preloaded), read_ms, output_tokens, write_ms.
     model: dict[str, int] = field(default_factory=dict)
     schema_in_prompt: str = ""  # "full" (preloaded, reused) or "selected" (picked per question)
+    source: str = ""            # "schema" when answered from the known structure, no query run
 
     @property
     def ok(self) -> bool:
@@ -179,6 +181,14 @@ class Assistant:
     def _answer(self, ans: Answer, schema: SchemaInfo, retriever: TableRetriever,
                 history: list[dict]) -> None:
         cache_key = _cache_key(ans.question, history)
+
+        # 0. Questions about the structure itself ("how many tables?") come straight from
+        #    the loaded schema: exact, instant, and no system catalog is ever queried.
+        meta = answer_schema_question(ans.question, schema)
+        if meta is not None:
+            ans.answer, ans.columns, ans.rows = meta.answer, meta.columns, meta.rows
+            ans.row_count, ans.source = len(meta.rows), "schema"
+            return
 
         # 1. A person-verified SQL for this exact question wins: fastest and most precise.
         if not history:

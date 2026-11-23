@@ -101,12 +101,17 @@
     const { wrap, bubble } = message(kind, a.error || a.answer);
     if (a.error && !a.sql) return wrap;
 
-    if (a.ok && a.columns.length && !(a.row_count === 1 && a.columns.length === 1)) {
+    if (a.ok && a.columns.length && (a.source === "schema" || !(a.row_count === 1 && a.columns.length === 1))) {
       bubble.appendChild(renderTable(a.columns, a.rows));
     }
     const meta = el("div", "meta");
     if (a.ok) meta.appendChild(chip(`${a.row_count}${a.truncated ? "+" : ""} row${a.row_count === 1 ? "" : "s"}`));
     if (a.tables && a.tables.length) meta.appendChild(chip(a.tables.join(", ")));
+    if (a.source === "schema") {
+      const c = chip("from the schema");
+      c.title = "Answered from the database structure the app has loaded. No query was run.";
+      meta.appendChild(c);
+    }
     if (a.verified) meta.appendChild(chip("verified answer", "good"));
     else if (a.cached) meta.appendChild(chip("cached"));
     if (a.attempts > 1) meta.appendChild(chip(`${a.attempts} tries`));

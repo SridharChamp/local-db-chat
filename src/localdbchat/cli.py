@@ -52,7 +52,8 @@ def _print_answer(ans, show_sql: bool) -> None:
         _print_table(ans.columns, ans.rows)
     if show_sql and ans.sql:
         print(f"\nSQL:\n{ans.sql}")
-    tags = [t for t, on in (("verified", ans.verified), ("cached", ans.cached)) if on]
+    tags = [t for t, on in (("verified", ans.verified), ("cached", ans.cached),
+                            ("from the schema, no query run", ans.source == "schema")) if on]
     m = ans.model
     if m:
         tags.append(f"model: prompt read in {m.get('read_ms', 0) / 1000:.1f}s, "
