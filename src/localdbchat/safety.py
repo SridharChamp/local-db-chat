@@ -223,8 +223,32 @@ def check_sql(sql: str, schema: SchemaInfo, *, max_rows: int) -> tuple[str, list
                 raise UnsafeQueryError(f"Column '{col.name}' does not exist in the tables used "
                                        f"({', '.join(t.full_name for t in used.values())}).")
 
+    if dialect == "mysql" and any((j.side or "").upper() == "FULL" for j in tree.find_all(exp.Join)):
+        raise UnsafeQueryError(
+            "MySQL does not support FULL OUTER JOIN. Combine the two sides another way, for example "
+            "a UNION of the keys followed by LEFT JOINs to each side.")
+
+    shape = _shape(tree)
     _apply_limit(tree, max_rows)
-    return tree.sql(dialect=dialect), [t.full_name for t in used.values()]
+    out = tree.sql(dialect=dialect)
+    # Writing the query back out for this dialect must never change what it means. The parser library
+    # can rewrite features a dialect lacks (e.g. FULL OUTER JOIN into a UNION), which breaks
+    # aggregates. If the structure changed, refuse instead of running something else.
+    try:
+        regenerated = sqlglot.parse_one(out, read=dialect)
+    except (ParseError, TokenError) as exc:
+        raise UnsafeQueryError("The query could not be prepared for this database. Write it more simply.") from exc
+    if _shape(regenerated) != shape:
+        raise UnsafeQueryError("This database does not support part of that query as written. "
+                               "Rewrite it with features this database supports.")
+    return out, [t.full_name for t in used.values()]
+
+
+def _shape(tree: exp.Expression) -> tuple[int, int, int]:
+    """A rough fingerprint of a query's structure: SELECTs, set operations, joins."""
+    return (sum(1 for _ in tree.find_all(exp.Select)),
+            sum(1 for _ in tree.find_all(exp.Union, exp.Intersect, exp.Except)),
+            sum(1 for _ in tree.find_all(exp.Join)))
 
 
 def _is_quoted_string_identifier(col: exp.Column, dialect: str) -> bool:

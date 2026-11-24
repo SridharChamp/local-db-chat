@@ -88,3 +88,25 @@ def test_self_reference_is_spelled_out():
     text = render_table(emp, "mysql")
     assert "join employees to itself" in text
     assert "ON y.employee_id = x.manager_id" in text
+
+
+def test_mysql_full_outer_join_is_refused_not_rewritten():
+    # sqlglot would turn this into LEFT JOIN ... UNION ALL ... RIGHT JOIN, which splits the counts
+    # across two rows. The guard must refuse instead of silently changing the meaning.
+    sql = ("SELECT COUNT(CASE WHEN c.id IS NULL THEN 1 END) AS only_orders "
+           "FROM customers c FULL OUTER JOIN orders o ON o.customer_id = c.id")
+    with pytest.raises(UnsafeQueryError, match="FULL OUTER JOIN"):
+        check_sql(sql, make_schema("mysql"), max_rows=100)
+
+
+@pytest.mark.parametrize("dialect", ["postgres", "tsql"])
+def test_full_outer_join_kept_where_supported(dialect):
+    sql = "SELECT c.name, o.amount FROM customers c FULL OUTER JOIN orders o ON o.customer_id = c.id"
+    out, _ = check_sql(sql, make_schema(dialect), max_rows=100)
+    assert "FULL OUTER JOIN" in out and "UNION" not in out
+
+
+def test_mysql_union_based_rewrite_still_allowed():
+    sql = ("WITH k AS (SELECT id FROM customers UNION SELECT customer_id FROM orders) "
+           "SELECT COUNT(*) AS n FROM k LEFT JOIN customers c ON c.id = k.id")
+    check_sql(sql, make_schema("mysql"), max_rows=100)
