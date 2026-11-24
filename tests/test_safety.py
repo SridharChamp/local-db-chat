@@ -152,3 +152,12 @@ def test_keeps_small_limit(schema):
 ])
 def test_extract_sql(reply, expected):
     assert extract_sql(reply) == expected
+
+
+def test_unknown_column_error_points_to_the_right_table(schema):
+    # customers has no 'quantity'; it lives in order_items, two joins away
+    with pytest.raises(UnsafeQueryError) as info:
+        check_sql("SELECT c.full_name, c.quantity FROM customers c", schema, max_rows=50)
+    message = str(info.value)
+    assert "'quantity' is in: order_items" in message
+    assert "customers -> orders -> order_items" in message

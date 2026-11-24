@@ -191,21 +191,32 @@ class Database:
                 deadline = time.monotonic() + self.timeout_seconds
                 if self.backend == "sqlite":
                     raw.set_progress_handler(lambda: 1 if time.monotonic() > deadline else 0, 5000)
+                # A raw driver cursor, executed WITHOUT parameters: drivers then do no placeholder
+                # processing, so '%' in LIKE '%x%' or DATE_FORMAT(d, '%Y') stays literal (PyMySQL
+                # and psycopg would otherwise read it as a format marker and fail).
+                cur = conn.connection.cursor()
                 try:
-                    result = conn.exec_driver_sql(sql)
-                    if not result.returns_rows:
+                    cur.execute(sql)
+                    if cur.description is None:
                         return QueryResult([], [], False, self._ms(start))
-                    columns = [str(c) for c in result.keys()]
-                    fetched = result.fetchmany(cap + 1)
-                    result.close()
+                    columns = [str(d[0]) for d in cur.description]
+                    fetched = cur.fetchmany(cap + 1)
                 finally:
+                    try:
+                        cur.close()
+                    except Exception:
+                        pass
                     if self.backend == "sqlite":
                         raw.set_progress_handler(None, 0)
                     conn.rollback()
+        except DatabaseError:
+            raise
         except DBAPIError as exc:
             raise self._wrap(exc) from exc
         except SQLAlchemyError as exc:
             raise DatabaseError(scrub(str(exc).split("\n")[0], self.url)) from exc
+        except Exception as exc:  # a driver's own error class (not wrapped by SQLAlchemy here)
+            raise self._wrap_message(str(exc)) from exc
 
         truncated = len(fetched) > cap
         rows = [[to_jsonable(v) for v in row] for row in fetched[:cap]]
@@ -224,6 +235,20 @@ class Database:
     @staticmethod
     def _ms(start: float) -> int:
         return int((time.perf_counter() - start) * 1000)
+
+    def _wrap_message(self, original: str) -> DatabaseError:
+        """Classify a driver error raised outside SQLAlchemy (raw cursor)."""
+        original = (original or "").strip()
+        lower = original.lower()
+        if any(marker in lower for marker in TIMEOUT_MARKERS):
+            return DatabaseError(
+                f"The query took longer than {self.timeout_seconds}s and was stopped.", timeout=True)
+        if any(m in lower for m in ("lost connection", "server has gone away", "connection refused",
+                                    "could not connect", "connection is closed", "terminating connection")):
+            return DatabaseError(f"Lost the connection to the database at {self.display_url}.", connection=True)
+        if "read-only" in lower or "read only" in lower or "readonly" in lower:
+            return DatabaseError("The database refused the query because the session is read-only.")
+        return DatabaseError(scrub(original.split("\n")[0][:500], self.url) or "The database rejected the query.")
 
     def _wrap(self, exc: DBAPIError, *, connecting: bool = False) -> DatabaseError:
         original = str(getattr(exc, "orig", exc) or exc).strip()

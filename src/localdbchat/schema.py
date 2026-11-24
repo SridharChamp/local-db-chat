@@ -137,6 +137,28 @@ class SchemaInfo:
                 return t
         return None
 
+    def tables_with_column(self, column: str) -> list[Table]:
+        lc = column.lower()
+        return [t for t in self.tables.values() if any(c.name.lower() == lc and not c.sensitive for c in t.columns)]
+
+    def join_path(self, start: Table, goal: Table, max_hops: int = 4) -> list[Table] | None:
+        """Shortest chain of foreign-key joins from start to goal (breadth-first)."""
+        if start.key == goal.key:
+            return [start]
+        frontier, seen = [[start]], {start.key}
+        while frontier:
+            path = frontier.pop(0)
+            if len(path) > max_hops:
+                break
+            for n in self.neighbours(path[-1]):
+                if n.key in seen:
+                    continue
+                if n.key == goal.key:
+                    return path + [n]
+                seen.add(n.key)
+                frontier.append(path + [n])
+        return None
+
     def neighbours(self, table: Table) -> list[Table]:
         """Tables joined to this one by a foreign key, in either direction."""
         if self._adjacency is None:
@@ -374,8 +396,8 @@ def render_table(table: Table, dialect: str, samples: tuple[list[str], list[list
         if fk.ref_table.lower() == table.name.lower() and fk.columns and fk.ref_columns:
             # Small models miss self-references; spell out the self-join.
             note = (f"points to another row of {table.name}: join {table.name} to itself, "
-                    f"e.g. {table.name} x JOIN {table.name} y ON y.{fk.ref_columns[0]} = x.{fk.columns[0]} "
-                    f"(y is the row that x's {fk.columns[0]} points to)")
+                    f"e.g. {table.name} emp JOIN {table.name} mgr ON mgr.{fk.ref_columns[0]} = emp.{fk.columns[0]} "
+                    f"(mgr is the row that emp's {fk.columns[0]} points to; group by mgr for 'per manager')")
         body.append((f"  FOREIGN KEY ({', '.join(fk.columns)}) REFERENCES {ref}({', '.join(fk.ref_columns)})", note))
     for i, (text, comment) in enumerate(body):
         text += "," if i < len(body) - 1 else ""

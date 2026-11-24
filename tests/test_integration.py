@@ -147,3 +147,10 @@ def test_end_to_end_question(server, tmp_path):
 
 def _schema(db):
     return introspect(db, include_tables=["ldbc_*"], sensitive_patterns=Config().sensitive_columns)
+
+
+def test_percent_signs_are_literal(server):
+    # PyMySQL / psycopg treat '%' as a format marker when parameters are passed; we pass none.
+    _, db = server
+    assert db.run("SELECT COUNT(*) FROM ldbc_customers WHERE full_name LIKE '%Kumar%'").rows[0][0] == 1
+    assert db.run("SELECT '100%' AS v").rows[0][0] == "100%"

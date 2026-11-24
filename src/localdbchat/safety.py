@@ -215,13 +215,15 @@ def check_sql(sql: str, schema: SchemaInfo, *, max_rows: int) -> tuple[str, list
                 raise UnsafeQueryError(f"The column '{col.name}' is protected and cannot be used.")
         if qualifier and qualifier in alias_to_table:
             if alias_to_table[qualifier].column(cname) is None:
-                raise UnsafeQueryError(
-                    f"Column '{col.name}' does not exist in {alias_to_table[qualifier].full_name}.")
+                owner = alias_to_table[qualifier]
+                raise UnsafeQueryError(f"Column '{col.name}' does not exist in {owner.full_name}."
+                                       + _where_it_is(col.name, [owner], schema))
         elif not qualifier and used and cname not in known_columns and cname not in query_aliases:
             # Could be a string the dialect reads as an identifier ("abc" in MySQL is fine).
             if not _is_quoted_string_identifier(col, dialect):
                 raise UnsafeQueryError(f"Column '{col.name}' does not exist in the tables used "
-                                       f"({', '.join(t.full_name for t in used.values())}).")
+                                       f"({', '.join(t.full_name for t in used.values())})."
+                                       + _where_it_is(col.name, list(used.values()), schema))
 
     if dialect == "mysql" and any((j.side or "").upper() == "FULL" for j in tree.find_all(exp.Join)):
         raise UnsafeQueryError(
@@ -249,6 +251,23 @@ def _shape(tree: exp.Expression) -> tuple[int, int, int]:
     return (sum(1 for _ in tree.find_all(exp.Select)),
             sum(1 for _ in tree.find_all(exp.Union, exp.Intersect, exp.Except)),
             sum(1 for _ in tree.find_all(exp.Join)))
+
+
+def _where_it_is(column: str, from_tables: list[Table], schema: SchemaInfo) -> str:
+    """Point the model at the table that has this column and the joins to reach it."""
+    owners = schema.tables_with_column(column)
+    if not owners:
+        return ""
+    hint = f" '{column}' is in: {', '.join(t.full_name for t in owners[:4])}."
+    best = None
+    for start in from_tables:
+        for goal in owners:
+            path = schema.join_path(start, goal)
+            if path and (best is None or len(path) < len(best)):
+                best = path
+    if best and len(best) > 1:
+        hint += " Reach it by joining " + " -> ".join(t.full_name for t in best) + " (see How tables connect)."
+    return hint
 
 
 def _is_quoted_string_identifier(col: exp.Column, dialect: str) -> bool:

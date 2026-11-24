@@ -87,7 +87,7 @@ def test_self_reference_is_spelled_out():
                 foreign_keys=[ForeignKey(["manager_id"], None, "employees", ["employee_id"])])
     text = render_table(emp, "mysql")
     assert "join employees to itself" in text
-    assert "ON y.employee_id = x.manager_id" in text
+    assert "ON mgr.employee_id = emp.manager_id" in text
 
 
 def test_mysql_full_outer_join_is_refused_not_rewritten():

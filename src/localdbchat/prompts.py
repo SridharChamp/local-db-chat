@@ -29,11 +29,20 @@ DIALECT_NOTES = {
 SYSTEM = """You translate questions into ONE read-only SQL query for {dialect_note}
 
 Rules:
-- Output only the SQL in a ```sql block. No explanation.
+- Reply with one ```sql block and nothing else. Inside it, start with 1 to 4 short comment lines
+  ("-- ...") that plan the query: the tables needed, how they join (use "How tables connect"),
+  what to group by, and what each output column means. Then write the query.
 - Exactly one SELECT statement (CTEs allowed). Never modify data.
-- Use only the tables and columns listed below, spelled exactly as shown.
+- Use only the tables and columns listed below, spelled exactly as shown. If a column you need is
+  not in a table, follow "How tables connect" to the table that has it.
 - Qualify columns with table aliases whenever more than one table is used.
 - Join only on the foreign keys shown, unless a column name match is obvious.
+- Count or sum the rows of one table "per" or "for each" row of another: join them, then GROUP BY
+  the "per" table's key and name.
+- When a question has several numbered parts or categories, answer them all in one query: either one
+  row with one column per part, or one row per item with a column that names its part.
+- "Only A", "only B" and "both" compare two sets: build each set in a CTE with SELECT DISTINCT, combine
+  their keys with UNION, LEFT JOIN each set, and classify with CASE WHEN ... IS NULL.
 - "Per manager", "under each manager", "for each parent" and similar questions about a table that points
   to itself need a self-join with two aliases. Group by the referenced row (the manager), and add up
   the rows that point to it.
@@ -90,6 +99,8 @@ def render_schema(schema: SchemaInfo, tables: list[Table], samples: SampleCache 
     bare_left = sum(len(b) + 2 for b in bare)  # cost of every table not yet placed, without samples
     if require_all and bare_left > budget:
         return None
+    joins = relationships(tables)
+    budget -= len(joins)
     blocks: list[str] = []
     remaining = budget
     for table, plain in zip(tables, bare, strict=True):
@@ -105,7 +116,30 @@ def render_schema(schema: SchemaInfo, tables: list[Table], samples: SampleCache 
             break
         blocks.append(choice)
         remaining -= len(choice) + 2
+    if joins:
+        blocks.append(joins)
     return "\n\n".join(blocks)
+
+
+def relationships(tables: list[Table]) -> str:
+    """Every join path in one compact list. Small models find a multi-hop path
+    (employees -> departments -> locations -> countries) far more reliably from this
+    than from foreign keys scattered across table definitions."""
+    names = {t.name.lower() for t in tables}
+    lines = []
+    for t in tables:
+        for fk in t.foreign_keys:
+            if fk.ref_table.lower() not in names or not fk.ref_columns:
+                continue
+            pairs = " AND ".join(f"{t.name}.{c} = {fk.ref_table}.{r}"
+                                 for c, r in zip(fk.columns, fk.ref_columns, strict=False))
+            if fk.ref_table.lower() == t.name.lower():
+                pairs += (f"   (same table: join {t.name} emp to {t.name} mgr ON mgr.{fk.ref_columns[0]} = "
+                          f"emp.{fk.columns[0]}; mgr is the row that emp's {fk.columns[0]} points to)")
+            lines.append(f"- {pairs}")
+    if not lines:
+        return ""
+    return "How tables connect:\n" + "\n".join(dict.fromkeys(lines))
 
 
 def build_system(schema: SchemaInfo, schema_text: str, glossary: dict[str, str]) -> str:
@@ -133,6 +167,12 @@ WARM_UP_QUESTION = "Reply with OK."
 
 
 def retry_message(problem: str) -> dict:
+    if "Reach it by joining" in problem:
+        # The app found the join path itself, so the question IS answerable: don't offer a way out.
+        return {"role": "user", "content":
+                f"That query failed: {problem}\nThe question can be answered. Rewrite the query with that "
+                "chain of joins, using the conditions listed under How tables connect. Reply with only the "
+                "corrected SQL in a ```sql block."}
     return {"role": "user", "content":
             f"That query failed: {problem}\nFix it. Reply with only the corrected SQL in a ```sql block. "
             f"If the tables really cannot answer the question, reply with {CANNOT_ANSWER} and the reason."}
