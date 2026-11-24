@@ -27,9 +27,9 @@ dependencies = [
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.1"]
-mysql = ["pymysql>=1.1"]
+mysql = ["pymysql>=1.1", "cryptography>=42"]  # cryptography: MySQL 8 default sign-in (caching_sha2_password)
 mssql = ["pyodbc>=5.0"]
-all = ["psycopg[binary]>=3.1", "pymysql>=1.1", "pyodbc>=5.0"]
+all = ["psycopg[binary]>=3.1", "pymysql>=1.1", "cryptography>=42", "pyodbc>=5.0"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.urls]
