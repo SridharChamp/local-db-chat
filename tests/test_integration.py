@@ -134,7 +134,7 @@ def test_end_to_end_question(server, tmp_path):
     sql = ("SELECT c.full_name, COUNT(o.order_id) AS n, SUM(o.amount) AS total "
            "FROM ldbc_customers c JOIN ldbc_orders o ON o.customer_id = c.customer_id "
            "WHERE c.city = 'Chennai' GROUP BY c.full_name ORDER BY n DESC")
-    cfg = Config(database_url=url, include_tables=["ldbc_*"], max_rows=10,
+    cfg = Config(database_url=url, include_tables=["ldbc_*"], max_rows=10, explain_answers=False,
                  learned_examples_file=str(tmp_path / "learned.json"))
     assistant = Assistant(cfg, db=db, llm=FakeLLM([f"```sql\n{sql}\n```"]))
     ans = assistant.ask("How many orders and how much did each Chennai customer spend?")

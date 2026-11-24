@@ -275,3 +275,9 @@ def test_grounding_accepts_formatting_and_sql_numbers():
 def test_schema_answers_never_call_the_model_for_a_sentence(make_assistant):
     a, llm = make_assistant([], explain_answers=True)
     assert a.ask("how many tables are there?").ok and llm.calls == []
+
+
+def test_failure_while_writing_the_sentence_keeps_the_answer(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents")], explain_answers=True)
+    ans = a.ask("How many agents?")  # the stand-in model has no reply left for the sentence
+    assert ans.ok and not ans.error and ans.answer == "The answer is 4." and not ans.articulated

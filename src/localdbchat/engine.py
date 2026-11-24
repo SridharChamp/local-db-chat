@@ -348,7 +348,12 @@ class Assistant:
         return text if is_grounded(text, question, sql, rows, row_count) else None
 
     def _explain(self, ans: Answer) -> None:
-        text = self.articulate(ans.question, ans.sql, ans.columns, ans.rows, ans.row_count, ans.truncated)
+        # The sentence is optional polish: whatever goes wrong here, the answer already found stays.
+        try:
+            text = self.articulate(ans.question, ans.sql, ans.columns, ans.rows, ans.row_count, ans.truncated)
+        except Exception:
+            log.exception("Could not write the answer sentence for %r; keeping the exact answer", ans.question)
+            return
         if text:
             ans.answer, ans.articulated = text, True
 
