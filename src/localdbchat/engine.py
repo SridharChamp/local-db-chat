@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from sqlalchemy.engine import make_url
 
 from .config import Config
 from .db import Database, DatabaseError, QueryResult
@@ -27,6 +31,7 @@ from .prompts import (
 from .retrieval import TableRetriever
 from .safety import UnsafeQueryError, check_sql, extract_sql
 from .schema import SampleCache, SchemaInfo, introspect
+from .util import redact_url
 
 log = logging.getLogger("localdbchat")
 
@@ -85,12 +90,13 @@ class Assistant:
         self.llm = llm or OllamaClient(cfg.ollama_url, cfg.model, embed_model=cfg.embed_model,
                                        timeout=cfg.llm_timeout_seconds, num_ctx=cfg.num_ctx,
                                        keep_alive=cfg.keep_alive, allow_remote=cfg.allow_remote_llm)
-        self.examples = ExampleStore(cfg.learned_examples_file, static=cfg.examples,
+        self.examples = ExampleStore(learned_file_for(cfg), static=cfg.examples,
                                      max_items=cfg.max_learned_examples)
         self.samples = SampleCache(self.db, cfg.sample_rows)
         self._schema: SchemaInfo | None = None
         self._retriever: TableRetriever | None = None
         self._prefix: str | None = None  # fixed rules + full schema, identical for every question
+        self._glossary: dict[str, str] = {}  # the configured glossary, minus terms for other databases
         self.preloaded = False
         self._schema_lock = threading.Lock()
         self._sql_cache: OrderedDict[str, tuple[str, list[str]]] = OrderedDict()
@@ -109,9 +115,11 @@ class Assistant:
                                 include_tables=self.cfg.include_tables,
                                 exclude_tables=self.cfg.exclude_tables,
                                 sensitive_patterns=self.cfg.sensitive_columns)
-            retriever = TableRetriever(schema, self.cfg.glossary, self.llm)
+            glossary = glossary_for(self.cfg.glossary, schema)
+            retriever = TableRetriever(schema, glossary, self.llm)
             # Swap atomically; requests in flight keep the old objects.
             self.samples.clear()
+            self._glossary = glossary
             prefix = self._build_prefix(schema)
             self._schema, self._retriever, self._prefix = schema, retriever, prefix
             self.preloaded = False
@@ -127,14 +135,14 @@ class Assistant:
             return None
         # Most-connected tables first: when space is short, they keep their sample rows.
         ordered = sorted(schema.tables.values(), key=lambda t: (-len(schema.neighbours(t)), t.key))
-        budget = schema_char_budget(self.cfg.num_ctx, self.cfg.glossary)
+        budget = schema_char_budget(self.cfg.num_ctx, self._glossary)
         text = render_schema(schema, ordered, self.samples, budget, require_all=True)
         if text is None:
             log.warning("The schema (%d tables) is too big to preload into a %d-token context; relevant "
                         "tables will be picked per question. Raise num_ctx to preload it all.",
                         len(schema), self.cfg.num_ctx)
             return None
-        return build_system(schema, text, self.cfg.glossary)
+        return build_system(schema, text, self._glossary)
 
     @property
     def schema_preloadable(self) -> bool:
@@ -225,11 +233,12 @@ class Assistant:
             system, ans.schema_in_prompt = prefix, "full"
         else:
             tables = retriever.select(ans.question, self.cfg.max_tables_in_prompt)
-            budget = schema_char_budget(self.cfg.num_ctx, self.cfg.glossary)
+            budget = schema_char_budget(self.cfg.num_ctx, self._glossary)
             system = build_system(schema, render_schema(schema, tables, self.samples, budget) or "",
-                                  self.cfg.glossary)
+                                  self._glossary)
             ans.schema_in_prompt = "selected"
-        examples = [] if history else self.examples.similar(ans.question, 3)
+        examples = [] if history else [e for e in self.examples.similar(ans.question, 6)
+                                       if _fits(e["sql"], schema, self.cfg.max_rows)][:3]
         messages = build_messages(system, ans.question, examples=examples, history=history)
         ans.timings_ms["prompt"] = _ms(t0)
 
@@ -426,6 +435,52 @@ def _norm_num(n: str) -> str:
 def _label(column: str) -> str:
     text = column.replace("_", " ").strip()
     return text[:1].upper() + text[1:] if text else column
+
+
+def learned_file_for(cfg: Config) -> str:
+    """Verified answers are kept per database, so one database's SQL never coaches another.
+
+    The default file name gets a short fingerprint of the connection (without the password).
+    An explicitly configured file is used as is.
+    """
+    path = cfg.learned_examples_file
+    if path != Config().learned_examples_file or not cfg.database_url:
+        return path
+    try:
+        u = make_url(cfg.database_url)
+        identity = f"{u.get_backend_name()}|{u.host or ''}|{u.port or ''}|{u.database or ''}".lower()
+    except Exception:
+        identity = redact_url(cfg.database_url)
+    digest = hashlib.sha1(identity.encode("utf-8")).hexdigest()[:10]
+    p = Path(path)
+    return str(p.with_name(f"{p.stem}-{digest}{p.suffix}"))
+
+
+_QUALIFIED = re.compile(r"\b([A-Za-z_][\w$]*)\.([A-Za-z_][\w$]*)\b")
+
+
+def glossary_for(glossary: dict[str, str], schema: SchemaInfo) -> dict[str, str]:
+    """Drop glossary terms that point at tables this database doesn't have.
+
+    A glossary written for another database ("revenue: orders.total_amount ...") would
+    otherwise be followed as a rule and send the model to tables that don't exist.
+    """
+    kept: dict[str, str] = {}
+    for term, meaning in (glossary or {}).items():
+        missing = sorted({t for t, _ in _QUALIFIED.findall(str(meaning)) if schema.find(t) is None})
+        if missing:
+            log.warning("Glossary term %r ignored: %s not in this database.", term, ", ".join(missing))
+            continue
+        kept[term] = meaning
+    return kept
+
+
+def _fits(sql: str, schema: SchemaInfo, max_rows: int) -> bool:
+    try:
+        check_sql(sql, schema, max_rows=max_rows)
+        return True
+    except UnsafeQueryError:
+        return False
 
 
 def _clean_history(history) -> list[dict]:

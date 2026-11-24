@@ -281,3 +281,40 @@ def test_failure_while_writing_the_sentence_keeps_the_answer(make_assistant):
     a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents")], explain_answers=True)
     ans = a.ask("How many agents?")  # the stand-in model has no reply left for the sentence
     assert ans.ok and not ans.error and ans.answer == "The answer is 4." and not ans.articulated
+
+
+# ------------------------------------------------------------ switching databases
+def test_glossary_for_another_database_is_ignored(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents")], glossary={
+        "revenue": "sum of invoices.amount where invoices.paid = 1",   # no invoices table here
+        "active customer": "customers.status = 'A'",                  # fits this database
+        "vip": "a customer with more than 5 orders",                  # no table reference: kept
+    })
+    a.ask("How many agents?")
+    system = llm.calls[0][0]["content"]
+    assert "invoices" not in system
+    assert '"active customer" means' in system and '"vip" means' in system
+
+
+def test_verified_answers_are_kept_per_database(tmp_path):
+    from localdbchat.config import Config
+    from localdbchat.engine import learned_file_for
+    hr = learned_file_for(Config(database_url="mysql+pymysql://root:pw@127.0.0.1:3306/HR"))
+    shop = learned_file_for(Config(database_url="mysql+pymysql://root:pw@127.0.0.1:3306/shop"))
+    same_hr = learned_file_for(Config(database_url="mysql+pymysql://other:pw2@127.0.0.1:3306/hr"))
+    assert hr != shop and hr == same_hr          # same database, different login: same answers
+    assert "pw" not in hr
+    custom = learned_file_for(Config(database_url="sqlite:///x.db", learned_examples_file=str(tmp_path / "a.json")))
+    assert custom == str(tmp_path / "a.json")    # an explicit file is used as is
+
+
+def test_examples_that_do_not_fit_the_schema_are_skipped(make_assistant):
+    a, llm = make_assistant([fenced("SELECT COUNT(*) AS n FROM agents")], examples=[
+        {"question": "How many agents are in billing?", "sql": "SELECT COUNT(*) FROM staff WHERE team = 'x'"},
+        {"question": "How many agents are in the technical team?",
+         "sql": "SELECT COUNT(*) FROM agents WHERE team = 'Technical'"},
+    ])
+    a.ask("How many agents are there in total?")
+    shown = [m["content"] for m in llm.calls[0][1:-1]]
+    assert not any("staff" in s for s in shown)                       # other database's SQL: skipped
+    assert any("FROM agents WHERE team = 'Technical'" in s for s in shown)
