@@ -34,6 +34,9 @@ Rules:
 - Use only the tables and columns listed below, spelled exactly as shown.
 - Qualify columns with table aliases whenever more than one table is used.
 - Join only on the foreign keys shown, unless a column name match is obvious.
+- "Per manager", "under each manager", "for each parent" and similar questions about a table that points
+  to itself need a self-join with two aliases. Group by the referenced row (the manager), and add up
+  the rows that point to it.
 - Match text case-insensitively. Names in questions may be partial: use LIKE with %.
 - For "how many", return a count. For "top"/"most", ORDER BY and limit.
 - Return readable columns (names, dates, amounts), not only ids.

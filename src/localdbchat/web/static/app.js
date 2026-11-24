@@ -107,6 +107,7 @@
     const meta = el("div", "meta");
     if (a.ok) meta.appendChild(chip(`${a.row_count}${a.truncated ? "+" : ""} row${a.row_count === 1 ? "" : "s"}`));
     if (a.tables && a.tables.length) meta.appendChild(chip(a.tables.join(", ")));
+    if (a.source === "edited") meta.appendChild(chip("your SQL"));
     if (a.source === "schema") {
       const c = chip("from the schema");
       c.title = "Answered from the database structure the app has loaded. No query was run.";
@@ -171,8 +172,52 @@
       bad.onclick = () => send(false);
       actions.appendChild(good); actions.appendChild(bad);
     }
+    if (a.sql && a.question) {
+      const edit = el("button", "ghost", "Edit SQL");
+      edit.type = "button";
+      edit.title = "Correct the query yourself, run it, then press Correct to save it as the verified answer";
+      edit.onclick = () => openEditor(a, bubble, edit);
+      actions.appendChild(edit);
+    }
     if (actions.children.length) bubble.appendChild(actions);
     return wrap;
+  }
+
+  // "Edit SQL": someone who knows the database fixes the query once; saved with Correct,
+  // the question is then answered exactly, without the model.
+  function openEditor(a, bubble, button) {
+    if (bubble.querySelector(".editor")) return;
+    button.disabled = true;
+    const box = el("div", "editor");
+    const area = el("textarea", "sql-edit");
+    area.value = a.sql;
+    area.rows = Math.min(14, Math.max(4, a.sql.split("\n").length + 1));
+    area.spellcheck = false;
+    area.setAttribute("aria-label", "SQL to run");
+    const row = el("div", "actions");
+    const runBtn = el("button", "", "Run");
+    const cancel = el("button", "ghost", "Cancel");
+    runBtn.type = cancel.type = "button";
+    const msg = el("p", "msg-line");
+    cancel.onclick = () => { box.remove(); button.disabled = false; };
+    runBtn.onclick = async () => {
+      runBtn.disabled = true;
+      msg.textContent = "Running…";
+      msg.className = "msg-line";
+      try {
+        const r = await api("/api/run", { question: a.question, sql: area.value });
+        if (r.error) { msg.textContent = r.error; msg.className = "msg-line bad"; return; }
+        box.remove(); button.disabled = false;
+        const node = add(renderAnswer(r));
+        if (r.explain_pending) articulate(r, node);
+      } catch (e) {
+        msg.textContent = e.message; msg.className = "msg-line bad";
+      } finally { runBtn.disabled = false; }
+    };
+    row.appendChild(runBtn); row.appendChild(cancel);
+    box.appendChild(area); box.appendChild(msg); box.appendChild(row);
+    bubble.appendChild(box);
+    area.focus();
   }
 
   // Fill in the written sentence after the table is already on screen.

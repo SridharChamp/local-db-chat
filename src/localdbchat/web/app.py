@@ -51,6 +51,11 @@ class FeedbackRequest(BaseModel):
     correct: bool
 
 
+class RunRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
+    sql: str = Field(min_length=1, max_length=20_000)
+
+
 class ExplainRequest(BaseModel):
     question: str = Field(min_length=1, max_length=MAX_QUESTION_CHARS)
     sql: str = Field(min_length=1, max_length=20_000)
@@ -297,6 +302,16 @@ def create_app(assistant: Assistant | None, *, cfg: Config | None = None, config
         out = answer.to_dict()
         out["explain_pending"] = bool(a.cfg.explain_answers and answer.ok and answer.sql
                                       and answer.source != "schema")
+        return out
+
+    @app.post("/api/run")
+    async def run(body: RunRequest):
+        """Run SQL a person corrected ("Edit SQL"), through the same safety checks."""
+        a = current()
+        async with limiter:
+            answer = await asyncio.to_thread(a.run_sql, body.question, body.sql)
+        out = answer.to_dict()
+        out["explain_pending"] = bool(a.cfg.explain_answers and answer.ok and answer.sql)
         return out
 
     @app.post("/api/explain")

@@ -66,6 +66,9 @@ pre { background: var(--code); padding: 10px; border-radius: 8px; overflow-x: au
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .actions button { font-size: 13px; padding: 4px 10px; }
 .note { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--warn-bg); font-size: 13px; }
+.editor { margin-top: 10px; }
+.sql-edit { width: 100%; font: 13px/1.45 var(--mono); padding: 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--code); color: var(--text); resize: vertical; }
 .pending-text { opacity: .6; }
 .pending-text::after { content: " · writing…"; font-weight: 400; font-size: 13px; color: var(--muted); }
 .thinking { color: var(--muted); font-style: italic; }

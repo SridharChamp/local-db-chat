@@ -69,7 +69,7 @@ class Answer:
     # schema was already preloaded), read_ms, output_tokens, write_ms.
     model: dict[str, int] = field(default_factory=dict)
     schema_in_prompt: str = ""  # "full" (preloaded, reused) or "selected" (picked per question)
-    source: str = ""            # "schema" when answered from the known structure, no query run
+    source: str = ""            # "schema": from the known structure; "edited": SQL written by a person
     articulated: bool = False   # answer text written by the model and checked against the data
 
     @property
@@ -365,6 +365,27 @@ class Assistant:
             return
         if text:
             ans.answer, ans.articulated = text, True
+
+    def run_sql(self, question: str, sql: str) -> Answer:
+        """Run SQL a person wrote or corrected for a question, through the same safety checks.
+
+        Used by "Edit SQL": the result can then be saved with confirm() so the question is
+        answered exactly from then on, without the model.
+        """
+        started = time.perf_counter()
+        ans = Answer(question=(question or "").strip(), source="edited")
+        try:
+            schema = self.schema
+            safe, used = check_sql(extract_sql(sql), schema, max_rows=self.cfg.max_rows)
+            t = time.perf_counter()
+            result = self.db.run(safe)
+            ans.timings_ms["db"] = _ms(t)
+            ans.sql, ans.tables = safe, used
+            self._fill(ans, result)
+        except (UnsafeQueryError, DatabaseError) as exc:
+            ans.sql, ans.error = sql, str(exc)
+        ans.timings_ms["total"] = _ms(started)
+        return ans
 
     # -------------------------------------------------------------- feedback
     def confirm(self, question: str, sql: str) -> None:

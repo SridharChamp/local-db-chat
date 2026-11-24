@@ -106,6 +106,12 @@ examples:
     sql: SELECT COUNT(*) FROM customers WHERE status = 'A'
 ```
 
+When the model gets a question wrong, someone who knows the database clicks **Edit SQL**, fixes the
+query, presses **Run** (it goes through the same safety checks) and then **Correct**. Small local models
+miss harder questions, such as self-joins like "total salary under each manager". This is how they become
+exact anyway: the support team never needs SQL, and whoever knows the schema teaches each hard
+question once.
+
 In the chat, pressing **Correct** under an answer saves that question and SQL as a verified example.
 The same question is then answered instantly without the model, and similar questions get it as a
 worked example. Verified examples are stored in `.ldbc/learned.json`. Move the good ones into

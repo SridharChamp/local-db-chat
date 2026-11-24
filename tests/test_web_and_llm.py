@@ -102,3 +102,12 @@ def test_table_first_then_sentence(make_assistant):
     assert len(llm.calls) == 1  # the sentence was not written yet: the table shows immediately
     body = {k: first[k] for k in ("question", "sql", "columns", "rows", "row_count", "truncated")}
     assert c.post("/api/explain", json=body).json() == {"answer": "There are 4 agents."}
+
+
+def test_run_endpoint(make_assistant):
+    a, _ = make_assistant([])
+    c = TestClient(create_app(a), base_url="http://127.0.0.1:8765")
+    ok = c.post("/api/run", json={"question": "agents", "sql": "SELECT name FROM agents ORDER BY name"}).json()
+    assert ok["ok"] and ok["source"] == "edited" and ok["row_count"] == 4
+    bad = c.post("/api/run", json={"question": "agents", "sql": "DROP TABLE agents"}).json()
+    assert not bad["ok"] and "only select" in bad["error"].lower()

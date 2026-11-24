@@ -370,7 +370,13 @@ def render_table(table: Table, dialect: str, samples: tuple[list[str], list[list
         body.append((" ".join(bits), note))
     for fk in table.foreign_keys:
         ref = f"{fk.ref_schema}.{fk.ref_table}" if fk.ref_schema else fk.ref_table
-        body.append((f"  FOREIGN KEY ({', '.join(fk.columns)}) REFERENCES {ref}({', '.join(fk.ref_columns)})", ""))
+        note = ""
+        if fk.ref_table.lower() == table.name.lower() and fk.columns and fk.ref_columns:
+            # Small models miss self-references; spell out the self-join.
+            note = (f"points to another row of {table.name}: join {table.name} to itself, "
+                    f"e.g. {table.name} x JOIN {table.name} y ON y.{fk.ref_columns[0]} = x.{fk.columns[0]} "
+                    f"(y is the row that x's {fk.columns[0]} points to)")
+        body.append((f"  FOREIGN KEY ({', '.join(fk.columns)}) REFERENCES {ref}({', '.join(fk.ref_columns)})", note))
     for i, (text, comment) in enumerate(body):
         text += "," if i < len(body) - 1 else ""
         lines.append(text + (f"  -- {comment}" if comment else ""))

@@ -318,3 +318,29 @@ def test_examples_that_do_not_fit_the_schema_are_skipped(make_assistant):
     shown = [m["content"] for m in llm.calls[0][1:-1]]
     assert not any("staff" in s for s in shown)                       # other database's SQL: skipped
     assert any("FROM agents WHERE team = 'Technical'" in s for s in shown)
+
+
+# ------------------------------------------------------------ Edit SQL: teach the right answer
+def test_corrected_sql_runs_and_can_be_saved(make_assistant):
+    a, llm = make_assistant([])
+    fixed = a.run_sql("How many agents per team?",
+                      "SELECT team, COUNT(*) AS n FROM agents GROUP BY team ORDER BY n DESC")
+    assert fixed.ok and fixed.source == "edited" and fixed.row_count == 3
+    a.confirm(fixed.question, fixed.sql)
+    again = a.ask("how many agents per team?")
+    assert again.ok and again.verified and again.rows == fixed.rows and llm.calls == []
+
+
+def test_corrected_sql_is_still_checked(make_assistant):
+    a, _ = make_assistant([])
+    for bad in ("DELETE FROM agents", "SELECT password_hash FROM customers", "SELECT * FROM nope"):
+        out = a.run_sql("q", bad)
+        assert not out.ok and out.error
+    assert a.db.run("SELECT COUNT(*) FROM agents").rows == [[4]]
+
+
+def test_window_functions_are_allowed(make_assistant):
+    a, _ = make_assistant([])
+    out = a.run_sql("rank teams", "SELECT team, COUNT(*) AS n, RANK() OVER (ORDER BY COUNT(*) DESC) AS r "
+                                  "FROM agents GROUP BY team")
+    assert out.ok and out.columns == ["team", "n", "r"]

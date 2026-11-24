@@ -78,3 +78,13 @@ def test_schema_qualified_name_resolves():
 def test_wrong_schema_refused():
     with pytest.raises(UnsafeQueryError, match="does not exist"):
         check_sql("SELECT name FROM sales.customers", make_schema("postgres"), max_rows=10)
+
+
+def test_self_reference_is_spelled_out():
+    from localdbchat.schema import render_table
+    emp = Table("employees", None, columns=[Column("employee_id", "INT", primary_key=True),
+                                            Column("manager_id", "INT"), Column("salary", "DECIMAL")],
+                foreign_keys=[ForeignKey(["manager_id"], None, "employees", ["employee_id"])])
+    text = render_table(emp, "mysql")
+    assert "join employees to itself" in text
+    assert "ON y.employee_id = x.manager_id" in text

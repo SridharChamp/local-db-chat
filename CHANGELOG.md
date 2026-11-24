@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Edit SQL**: correct a wrong query, run it through the same safety checks, and save it with
+  Correct. The question is then answered exactly and instantly, without the model.
+- Switching databases no longer carries the old glossary or verified answers along: glossary terms for
+  tables the database doesn't have are ignored, and verified answers are stored per database.
+- Self-referencing tables (employees.manager_id → employees.employee_id) are explained to the model.
+
 - Answers are written as plain sentences ("We have 90 active customers."). Every number in a sentence
   must appear in the result, with correct digit grouping, and no currency the data doesn't have.
   Otherwise the exact data-built answer is kept.
